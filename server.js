@@ -7,8 +7,15 @@ const cors = require("cors");
 const app = express();
 
 // 🔥 MIDDLEWARE
-app.use(cors());
-app.use(express.json());
+const cors = require("cors");
+
+app.use(cors({
+  origin: [
+    "http://localhost:5173",
+    "https://aurapay-dashboard.vercel.app"
+  ],
+  credentials: true,
+}));
 
 // 🔌 LOAD ROUTES (ONLY ONCE EACH)
 console.log("🔌 Loading routes...");
