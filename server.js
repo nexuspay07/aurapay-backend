@@ -12,7 +12,8 @@ app.use(express.json());
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://aurapay-dashboard.vercel.app"
+    "https://aurapay-dashboard.vercel.app",
+    "https://aurapay-dashboard-3gjugergf-nexuspay07-5796s-projects.vercel.app"
   ],
   credentials: true,
 }));
