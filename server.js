@@ -7,7 +7,7 @@ const cors = require("cors");
 const app = express();
 
 // 🔥 MIDDLEWARE
-const cors = require("cors");
+app.use(express.json());
 
 app.use(cors({
   origin: [
@@ -17,7 +17,7 @@ app.use(cors({
   credentials: true,
 }));
 
-// 🔌 LOAD ROUTES (ONLY ONCE EACH)
+// 🔌 LOAD ROUTES
 console.log("🔌 Loading routes...");
 
 const authRoutes = require("./routes/authRoutes");
@@ -25,10 +25,10 @@ const userRoutes = require("./routes/userRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 
-// ✅ MOUNT ROUTES
+// ✅ MOUNT ROUTES (clean structure)
 app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
-app.use("/wallet", paymentRoutes);
+app.use("/payments", paymentRoutes);
 app.use("/wallet", walletRoutes);
 
 console.log("✅ Routes loaded");
@@ -38,13 +38,14 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch(err => console.log("❌ DB Error:", err));
 
+// 🏠 ROOT ROUTE
+app.get("/", (req, res) => {
+  res.send("🚀 AuraPay API is running");
+});
+
 // 🚀 START SERVER
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-});
-
-app.get("/", (req, res) => {
-  res.send("🚀 AuraPay API is running");
 });
