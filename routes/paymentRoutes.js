@@ -13,7 +13,7 @@ const auth = require("../middlewares/auth");
 const { payWithStripe } = require("../services/stripeService");
 const { payWithPayPal } = require("../services/paypalService");
 const { chooseBestProvider } = require("../services/routingService");
-const { convert } = require("../services/fxService");
+const { convert } = require("../services/fxservice");
 
 const { detectFraud } = require("../services/fraudService");
 const { getProviderStats } = require("../services/metricsService");
