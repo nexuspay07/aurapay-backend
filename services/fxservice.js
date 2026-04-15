@@ -1,16 +1,18 @@
-const rates = {
-  USD_EUR: 0.86,
-  EUR_USD: 1.16,
-};
-
 function convert(amount, from, to) {
   if (from === to) return amount;
 
-  const key = `${from.toUpperCase()}_${to.toUpperCase()}`;
-  const rate = rates[key];
+  const rates = {
+    usd: { eur: 0.92 },
+    eur: { usd: 1.09 },
+  };
+
+  const lowerFrom = String(from).toLowerCase();
+  const lowerTo = String(to).toLowerCase();
+
+  const rate = rates[lowerFrom]?.[lowerTo];
 
   if (!rate) {
-    throw new Error("Conversion rate not available");
+    throw new Error(`Unsupported conversion: ${from} -> ${to}`);
   }
 
   return amount * rate;
