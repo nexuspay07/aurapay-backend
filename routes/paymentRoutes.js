@@ -22,13 +22,18 @@ const { processTransactionFeedback } = require("../services/feedbackService");
 const { applyDefense } = require("../services/defenseService");
 
 const round = (num) => Math.round(num * 100) / 100;
+const MAX_PAYMENT_LIMIT = 10000;
 
 router.get("/test", (req, res) => {
   res.send("✅ payment route works");
 });
 
 router.post("/pay", auth, async (req, res) => {
-  if (req.user.frozen && req.user.freezeUntil && new Date(req.user.freezeUntil) > new Date()) {
+  if (
+    req.user.frozen &&
+    req.user.freezeUntil &&
+    new Date(req.user.freezeUntil) > new Date()
+  ) {
     return res.status(403).json({
       status: "blocked",
       message: "Account is temporarily frozen",
@@ -45,17 +50,50 @@ router.post("/pay", auth, async (req, res) => {
     let providerUsed;
     let attempts = 1;
 
+    const amount = Number(data.amount);
     const currency = String(data.currency || "").toLowerCase();
 
-    if (!data.amount || data.amount <= 0 || !["usd", "eur"].includes(currency)) {
+    // ==================================================
+    // 🔒 PHASE 26 — BASIC PRODUCTION SAFETY
+    // ==================================================
+
+    // 1. Validate amount
+    if (!amount || Number.isNaN(amount) || amount <= 0) {
       return res.status(400).json({
-        error: "Invalid payment payload",
+        error: "Invalid amount",
       });
     }
+
+    // 2. Validate supported currencies
+    if (!["usd", "eur"].includes(currency)) {
+      return res.status(400).json({
+        error: "Unsupported currency",
+      });
+    }
+
+    // 3. Max payment protection
+    if (amount > MAX_PAYMENT_LIMIT) {
+      return res.status(400).json({
+        error: `Amount exceeds maximum limit (${MAX_PAYMENT_LIMIT})`,
+      });
+    }
+
+    // 4. Validate user balance object exists
+    if (!req.user.balance || typeof req.user.balance !== "object") {
+      return res.status(400).json({
+        error: "User wallet is not configured properly",
+      });
+    }
+
+    // 5. Ensure missing balances default to 0
+    const currentUsd = Number(req.user.balance.usd || 0);
+    const currentEur = Number(req.user.balance.eur || 0);
 
     // 🛡️ fraud detection
     const fraudResult = await detectFraud(req.user, {
       ...data,
+      amount,
+      currency,
       req,
     });
 
@@ -63,7 +101,7 @@ router.post("/pay", auth, async (req, res) => {
 
     await FraudLog.create({
       user: req.user._id,
-      amount: data.amount,
+      amount,
       currency,
       riskScore: fraudResult.riskScore,
       decision: fraudResult.decision,
@@ -79,7 +117,7 @@ router.post("/pay", auth, async (req, res) => {
         success: false,
         fraud: true,
         fraudDecision: fraudResult.decision,
-        amount: data.amount,
+        amount,
         provider: null,
       });
 
@@ -98,18 +136,22 @@ router.post("/pay", auth, async (req, res) => {
     // 💰 balance check
     let usedConverted = false;
 
-    if (req.user.balance[currency] >= data.amount) {
+    const currentBalance =
+      currency === "usd" ? currentUsd : currentEur;
+
+    if (currentBalance >= amount) {
       console.log("✅ Enough balance");
     } else {
       const otherCurrency = currency === "usd" ? "eur" : "usd";
-      const otherBalance = req.user.balance[otherCurrency];
+      const otherBalance =
+        otherCurrency === "usd" ? currentUsd : currentEur;
 
       const converted = convert(otherBalance, otherCurrency, currency);
 
-      if (converted >= data.amount) {
+      if (converted >= amount) {
         console.log("💱 Using converted balance");
 
-        const needed = round(convert(data.amount, currency, otherCurrency));
+        const needed = round(convert(amount, currency, otherCurrency));
 
         await User.findByIdAndUpdate(req.user._id, {
           $inc: { [`balance.${otherCurrency}`]: -needed },
@@ -118,7 +160,7 @@ router.post("/pay", auth, async (req, res) => {
         usedConverted = true;
       } else {
         return res.status(400).json({
-          error: "Insufficient funds",
+          error: "Insufficient balance",
         });
       }
     }
@@ -128,10 +170,18 @@ router.post("/pay", auth, async (req, res) => {
     console.log("🧠 AI Routing chose:", bestProvider);
 
     if (bestProvider === "Stripe") {
-      result = await measureExecution(() => payWithStripe(data));
+      result = await measureExecution(() => payWithStripe({
+        ...data,
+        amount,
+        currency,
+      }));
       providerUsed = "Stripe";
     } else {
-      result = await measureExecution(() => payWithPayPal(data));
+      result = await measureExecution(() => payWithPayPal({
+        ...data,
+        amount,
+        currency,
+      }));
       providerUsed = "PayPal";
     }
 
@@ -142,10 +192,18 @@ router.post("/pay", auth, async (req, res) => {
       attempts++;
 
       if (providerUsed === "Stripe") {
-        result = await measureExecution(() => payWithPayPal(data));
+        result = await measureExecution(() => payWithPayPal({
+          ...data,
+          amount,
+          currency,
+        }));
         providerUsed = "PayPal";
       } else {
-        result = await measureExecution(() => payWithStripe(data));
+        result = await measureExecution(() => payWithStripe({
+          ...data,
+          amount,
+          currency,
+        }));
         providerUsed = "Stripe";
       }
     }
@@ -154,7 +212,7 @@ router.post("/pay", auth, async (req, res) => {
     if (!result.success) {
       if (usedConverted) {
         const otherCurrency = currency === "usd" ? "eur" : "usd";
-        const refund = round(convert(data.amount, currency, otherCurrency));
+        const refund = round(convert(amount, currency, otherCurrency));
 
         await User.findByIdAndUpdate(req.user._id, {
           $inc: { [`balance.${otherCurrency}`]: refund },
@@ -166,20 +224,20 @@ router.post("/pay", auth, async (req, res) => {
         success: false,
         fraud: false,
         fraudDecision: fraudResult?.decision || "UNKNOWN",
-        amount: data.amount,
+        amount,
         provider: providerUsed,
       });
 
       return res.status(400).json({
         status: "failed",
-        error: result.error,
+        error: result.error || "Payment failed",
       });
     }
 
     // 💰 final deduction
     if (!usedConverted) {
       await User.findByIdAndUpdate(req.user._id, {
-        $inc: { [`balance.${currency}`]: -data.amount },
+        $inc: { [`balance.${currency}`]: -amount },
       });
     }
 
@@ -187,7 +245,7 @@ router.post("/pay", auth, async (req, res) => {
 
     await Transaction.create({
       user: req.user._id,
-      amount: data.amount,
+      amount,
       currency,
       provider: providerUsed,
       transactionId: result.id,
@@ -198,14 +256,14 @@ router.post("/pay", auth, async (req, res) => {
       success: true,
     });
 
-    await updateUserProfile(req.user._id, data.amount, currency);
+    await updateUserProfile(req.user._id, amount, currency);
 
     await processTransactionFeedback({
       user: req.user._id,
       success: true,
       fraud: false,
       fraudDecision: fraudResult?.decision || "APPROVE",
-      amount: data.amount,
+      amount,
       provider: providerUsed,
     });
 
@@ -227,7 +285,9 @@ router.post("/pay", auth, async (req, res) => {
 });
 
 router.get("/transactions", auth, async (req, res) => {
-  const data = await Transaction.find({ user: req.user._id }).sort({ createdAt: -1 });
+  const data = await Transaction.find({ user: req.user._id }).sort({
+    createdAt: -1,
+  });
   res.json(data);
 });
 
@@ -237,7 +297,9 @@ router.get("/intelligence", async (req, res) => {
 });
 
 router.get("/fraud-logs", auth, async (req, res) => {
-  const logs = await FraudLog.find({ user: req.user._id }).sort({ createdAt: -1 });
+  const logs = await FraudLog.find({ user: req.user._id }).sort({
+    createdAt: -1,
+  });
   res.json(logs);
 });
 
