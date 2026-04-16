@@ -1,58 +1,39 @@
 const express = require("express");
 const router = express.Router();
+
+const User = require("../models/User");
 const auth = require("../middlewares/auth");
 
-// 💰 GET BALANCE
+// 💰 Get wallet balance
 router.get("/balance", auth, async (req, res) => {
-  console.log("👤 FULL USER:", req.user);
-
-  res.json({
-    usd: req.user.balance?.usd,
-    eur: req.user.balance?.eur,
-  });
+  try {
+    const user = await User.findById(req.user._id).select("balance");
+    res.json(user.balance);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// ➕ DEPOSIT (MULTI-CURRENCY)
-router.post("/deposit", auth, async (req, res) => {
-  const { amount, currency } = req.body;
-
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ error: "Invalid amount" });
-  }
-
-  if (!currency || !req.user.balance[currency]) {
-    return res.status(400).json({ error: "Invalid currency" });
-  }
-
-  req.user.balance[currency] += amount;
-  await req.user.save();
-
-  res.json({
-    message: "Deposit successful",
-    balance: req.user.balance,
-  });
-});
-
-// 💰 TEST TOP-UP (DEV ONLY)
+// 💰 TEST TOP-UP
 router.post("/topup", auth, async (req, res) => {
   try {
     const { amount, currency } = req.body;
 
-    if (!amount || amount <= 0) {
+    if (!amount || Number(amount) <= 0) {
       return res.status(400).json({ error: "Invalid amount" });
     }
 
-    if (!["usd", "eur"].includes(currency)) {
+    if (!["usd", "eur"].includes(String(currency).toLowerCase())) {
       return res.status(400).json({ error: "Invalid currency" });
     }
 
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
       {
-        $inc: { [`balance.${currency}`]: Number(amount) },
+        $inc: { [`balance.${String(currency).toLowerCase()}`]: Number(amount) },
       },
       { new: true }
-    );
+    ).select("balance");
 
     res.json({
       message: "Account topped up",
