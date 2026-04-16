@@ -9,12 +9,31 @@ const app = express();
 // 🔥 MIDDLEWARE
 app.use(express.json());
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://aurapay-dashboard.vercel.app",
+];
+
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://aurapay-dashboard.vercel.app",
-    "https://aurapay-dashboard-3gjugergf-nexuspay07-5796s-projects.vercel.app"
-  ],
+  origin: function (origin, callback) {
+    // allow server-to-server / curl / Postman / no-origin requests
+    if (!origin) return callback(null, true);
+
+    // allow exact known origins
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // allow Vercel deployment URLs for this project
+    if (
+      origin.startsWith("https://aurapay-dashboard-") &&
+      origin.endsWith(".vercel.app")
+    ) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Not allowed by CORS"));
+  },
   credentials: true,
 }));
 
@@ -29,12 +48,8 @@ const walletRoutes = require("./routes/walletRoutes");
 // ✅ MOUNT ROUTES
 app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
-
-// keep frontend-compatible payment paths
 app.use("/wallet", paymentRoutes);
 app.use("/wallet", walletRoutes);
-
-// optional alias if you still want /payments/*
 app.use("/payments", paymentRoutes);
 
 console.log("✅ Routes loaded");
