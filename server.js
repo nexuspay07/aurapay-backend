@@ -26,23 +26,28 @@ const userRoutes = require("./routes/userRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 
-// ✅ MOUNT ROUTES (clean structure)
+// ✅ MOUNT ROUTES
 app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
-app.use("/payments", paymentRoutes);
+
+// keep frontend-compatible payment paths
+app.use("/wallet", paymentRoutes);
 app.use("/wallet", walletRoutes);
 
-console.log("✅ Routes loaded");
+// optional alias if you still want /payments/*
+app.use("/payments", paymentRoutes);
 
-// 🔗 DB CONNECT
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => console.log("❌ DB Error:", err));
+console.log("✅ Routes loaded");
 
 // 🏠 ROOT ROUTE
 app.get("/", (req, res) => {
   res.send("🚀 AuraPay API is running");
 });
+
+// 🔗 DB CONNECT
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => console.log("❌ DB Error:", err));
 
 // 🚀 START SERVER
 const PORT = process.env.PORT || 3000;
