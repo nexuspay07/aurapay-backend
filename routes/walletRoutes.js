@@ -33,4 +33,34 @@ router.post("/deposit", auth, async (req, res) => {
   });
 });
 
+// 💰 TEST TOP-UP (DEV ONLY)
+router.post("/topup", auth, async (req, res) => {
+  try {
+    const { amount, currency } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
+    if (!["usd", "eur"].includes(currency)) {
+      return res.status(400).json({ error: "Invalid currency" });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        $inc: { [`balance.${currency}`]: Number(amount) },
+      },
+      { new: true }
+    );
+
+    res.json({
+      message: "Account topped up",
+      balance: updatedUser.balance,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
