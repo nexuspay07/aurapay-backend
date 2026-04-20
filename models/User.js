@@ -1,24 +1,35 @@
 const mongoose = require("mongoose");
 
-const UserSchema = new mongoose.Schema(
+const userSchema = new mongoose.Schema(
   {
-    email: { type: String, unique: true },
-    password: String,
-
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      lowercase: true,
+    },
+    password: {
+      type: String,
+      required: true,
+    },
     balance: {
       usd: { type: Number, default: 0 },
       eur: { type: Number, default: 0 },
     },
 
-    fraudCount: { type: Number, default: 0 },
-
-    frozen: { type: Boolean, default: false },
-
-    freezeUntil: { type: Date, default: null },
-
-    preferredCurrency: { type: String, default: "usd" },
+    // ✅ Phase 34.1
+    status: {
+      type: String,
+      enum: ["unverified", "pending", "verified"],
+      default: "unverified",
+    },
+    onboardingCompleted: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model("User", UserSchema);
+module.exports = mongoose.model("User", userSchema);

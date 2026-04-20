@@ -4,26 +4,38 @@ const router = express.Router();
 const User = require("../models/User");
 const auth = require("../middlewares/auth");
 
-// 👤 current user profile
 router.get("/me", auth, async (req, res) => {
-  const user = await User.findById(req.user._id).select("-password");
-  res.json(user);
+  try {
+    const user = await User.findById(req.user._id).select(
+      "email balance status onboardingCompleted"
+    );
+
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// 💰 balance
 router.get("/balance", auth, async (req, res) => {
-  const user = await User.findById(req.user._id).select("balance");
-  res.json(user.balance);
+  try {
+    const user = await User.findById(req.user._id).select("balance");
+    res.json(user.balance);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// 🛡️ risk status
 router.get("/risk-status", auth, async (req, res) => {
-  const user = await User.findById(req.user._id).select("fraudCount frozen freezeUntil");
-  res.json({
-    fraudCount: user.fraudCount || 0,
-    frozen: user.frozen || false,
-    freezeUntil: user.freezeUntil || null,
-  });
+  try {
+    const user = await User.findById(req.user._id).select("frozen freezeUntil");
+    res.json({
+      frozen: user?.frozen || false,
+      freezeUntil: user?.freezeUntil || null,
+      fraudCount: 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

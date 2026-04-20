@@ -270,12 +270,15 @@ router.post("/pay", auth, async (req, res) => {
     console.log("💾 Transaction complete");
 
     res.json({
-      status: "completed",
-      provider: providerUsed,
-      latency: result.latency,
-      balance: updatedUser.balance,
-      fraud: fraudResult,
-    });
+  status: "completed",
+  provider: providerUsed,
+  latency: result.latency,
+  transactionId: result.id,
+  amount,
+  currency,
+  balance: updatedUser.balance,
+  fraud: fraudResult,
+});
   } catch (error) {
     console.log("🔥 FULL ERROR:", error);
     res.status(500).json({

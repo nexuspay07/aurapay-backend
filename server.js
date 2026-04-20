@@ -44,12 +44,14 @@ const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const walletRoutes = require("./routes/walletRoutes");
+const onboardingRoutes = require("./routes/onboardingRoutes");
 
 // ✅ MOUNT ROUTES
 app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
 app.use("/wallet", paymentRoutes);
 app.use("/wallet", walletRoutes);
+app.use("/onboarding", onboardingRoutes);
 app.use("/payments", paymentRoutes);
 
 console.log("✅ Routes loaded");
