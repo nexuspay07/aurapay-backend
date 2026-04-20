@@ -14,28 +14,27 @@ const allowedOrigins = [
   "https://aurapay-dashboard.vercel.app",
 ];
 
-app.use(cors({
-  origin: function (origin, callback) {
-    // allow server-to-server / curl / Postman / no-origin requests
-    if (!origin) return callback(null, true);
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
 
-    // allow exact known origins
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
 
-    // allow Vercel deployment URLs for this project
-    if (
-      origin.startsWith("https://aurapay-dashboard-") &&
-      origin.endsWith(".vercel.app")
-    ) {
-      return callback(null, true);
-    }
+      if (
+        origin.startsWith("https://aurapay-dashboard-") &&
+        origin.endsWith(".vercel.app")
+      ) {
+        return callback(null, true);
+      }
 
-    return callback(new Error("Not allowed by CORS"));
-  },
-  credentials: true,
-}));
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
 
 // 🔌 LOAD ROUTES
 console.log("🔌 Loading routes...");
@@ -45,14 +44,16 @@ const userRoutes = require("./routes/userRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const onboardingRoutes = require("./routes/onboardingRoutes");
+const stripeRoutes = require("./routes/stripeRoutes");
 
 // ✅ MOUNT ROUTES
 app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
 app.use("/wallet", paymentRoutes);
 app.use("/wallet", walletRoutes);
-app.use("/onboarding", onboardingRoutes);
 app.use("/payments", paymentRoutes);
+app.use("/onboarding", onboardingRoutes);
+app.use("/stripe", stripeRoutes);
 
 console.log("✅ Routes loaded");
 
@@ -62,7 +63,8 @@ app.get("/", (req, res) => {
 });
 
 // 🔗 DB CONNECT
-mongoose.connect(process.env.MONGO_URI)
+mongoose
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.log("❌ DB Error:", err));
 
