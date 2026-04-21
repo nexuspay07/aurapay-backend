@@ -1,19 +1,23 @@
-const Stripe = require("stripe");
-const stripe = new Stripe(process.env.STRIPE_KEY);
+const stripe = require("../config/stripe");
 
-async function payWithStripe(data) {
-  try {
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: data.amount * 100,
-      currency: data.currency,
-      payment_method: "pm_card_visa",
-      confirm: true,
-      automatic_payment_methods: { enabled: true, allow_redirects: "never" },
-    });
-    return { success: true, provider: "Stripe", id: paymentIntent.id, status: paymentIntent.status };
-  } catch (error) {
-    return { success: false, error: error.message };
+// ===============================
+// CREATE PAYMENT INTENT
+// ===============================
+async function createPaymentIntent(amount, currency = "usd") {
+  if (!amount || Number(amount) <= 0) {
+    throw new Error("Invalid amount");
   }
+
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: Math.round(Number(amount) * 100), // convert to cents
+    currency: String(currency || "usd").toLowerCase(),
+    automatic_payment_methods: { enabled: true },
+  });
+
+  return paymentIntent;
 }
 
-module.exports = { payWithStripe };
+// ✅ EXPORT CORRECTLY
+module.exports = {
+  createPaymentIntent,
+};
