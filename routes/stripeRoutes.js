@@ -40,6 +40,9 @@ router.post("/save-payment", auth, async (req, res) => {
   try {
     const { amount, currency, paymentIntentId, status } = req.body;
 
+    console.log("🔥 SAVE STRIPE PAYMENT BODY:", req.body);
+    console.log("👤 SAVE STRIPE PAYMENT USER:", req.user?._id);
+
     if (!amount || !currency || !paymentIntentId) {
       return res.status(400).json({
         error: "Missing required payment fields",
@@ -52,12 +55,15 @@ router.post("/save-payment", auth, async (req, res) => {
       currency: String(currency).toLowerCase(),
       provider: "Stripe",
       transactionId: paymentIntentId,
-      status: status || "completed",
-      success: true,
-      paymentType: "stripe",
+      status: status || "succeeded",
       latency: 0,
       attempts: 1,
+      errorMessage: null,
+      success: true,
+      paymentType: "stripe",
     });
+
+    console.log("✅ STRIPE PAYMENT SAVED:", transaction._id);
 
     res.json({
       message: "Stripe payment saved successfully",
