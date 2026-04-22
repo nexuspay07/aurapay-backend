@@ -47,6 +47,7 @@ const walletRoutes = require("./routes/walletRoutes");
 const onboardingRoutes = require("./routes/onboardingRoutes");
 const stripeRoutes = require("./routes/stripeRoutes");
 const checkoutRoutes = require("./routes/checkoutRoutes");
+const paypalCheckoutRoutes = require("./routes/paypalCheckoutRoutes");
 
 // ✅ MOUNT ROUTES
 app.use("/auth", authRoutes);
@@ -57,6 +58,7 @@ app.use("/payments", paymentRoutes);
 app.use("/onboarding", onboardingRoutes);
 app.use("/stripe", stripeRoutes);
 app.use("/checkout", checkoutRoutes);
+app.use("/paypal-checkout", paypalCheckoutRoutes);
 console.log("✅ Routes loaded");
 
 // 🏠 ROOT ROUTE
