@@ -1,40 +1,63 @@
 function scoreProvider(providerName, stats, amount) {
   const providerStats = stats?.[providerName] || {};
 
-  const successRate = Number(providerStats.successRate || 0); // higher is better
-  const avgLatency = Number(providerStats.avgLatency || 0);   // lower is better
+  const successRate = Number(providerStats.successRate || 0);
+  const avgLatency = Number(providerStats.avgLatency || 0);
 
   let score = 0;
+  const reasons = [];
 
   // ✅ success rate matters most
   score += successRate * 2;
+  reasons.push(`success rate contribution: ${successRate.toFixed(1)}%`);
 
   // ✅ lower latency is better
-  score -= avgLatency / 100;
+  const latencyPenalty = avgLatency / 100;
+  score -= latencyPenalty;
+  reasons.push(`latency penalty: ${avgLatency.toFixed(0)} ms`);
 
-  // ✅ simple amount-aware logic
+  // ✅ amount-aware logic
   if (amount >= 1000) {
-    if (providerName === "PayPal") score += 5;
+    if (providerName === "PayPal") {
+      score += 5;
+      reasons.push("large-amount bonus applied");
+    }
   } else {
-    if (providerName === "Stripe") score += 5;
+    if (providerName === "Stripe") {
+      score += 5;
+      reasons.push("small-amount bonus applied");
+    }
   }
 
-  return score;
+  return {
+    provider: providerName,
+    score,
+    reasons,
+    successRate,
+    avgLatency,
+  };
 }
 
-function buildProviderOrder(stats, amount) {
+function buildRoutingExplanation(stats, amount) {
   const providers = ["Stripe", "PayPal"];
 
   const ranked = providers
-    .map((provider) => ({
-      provider,
-      score: scoreProvider(provider, stats, amount),
-    }))
+    .map((provider) => scoreProvider(provider, stats, amount))
     .sort((a, b) => b.score - a.score);
 
-  return ranked.map((item) => item.provider);
+  const providerOrder = ranked.map((item) => item.provider);
+
+  return {
+    providerOrder,
+    rankedProviders: ranked,
+    recommendedProvider: ranked[0]?.provider || "Stripe",
+    reasonSummary:
+      amount >= 1000
+        ? "Large payment routing favored providers optimized for higher-value transfers."
+        : "Smaller payment routing favored faster providers.",
+  };
 }
 
 module.exports = {
-  buildProviderOrder,
+  buildRoutingExplanation,
 };

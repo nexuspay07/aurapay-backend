@@ -17,7 +17,7 @@ const { detectFraud } = require("../services/fraudService");
 const { getProviderStats } = require("../services/metricsService");
 const { updateUserProfile } = require("../services/riskProfileService");
 const { processTransactionFeedback } = require("../services/feedbackService");
-const { buildProviderOrder } = require("../services/dynamicRoutingService");
+const { buildRoutingExplanation } = require("../services/dynamicRoutingService");
 const { applyDefense } = require("../services/defenseService");
 
 const round = (num) => Math.round(num * 100) / 100;
@@ -161,9 +161,11 @@ router.post("/pay", auth, async (req, res) => {
     // 🚀 AUTO ROUTING + FALLBACK
     // ==================================================
     const stats = await getProviderStats();
-const providerOrder = buildProviderOrder(stats, amount);
+const routingExplanation = buildRoutingExplanation(stats, amount);
+const providerOrder = routingExplanation.providerOrder;
 
 console.log("🧠 Dynamic provider order:", providerOrder);
+console.log("🧠 Routing explanation:", routingExplanation);
 
 const providers = providerOrder.map((p) => p.toLowerCase());
     let lastError = null;
@@ -268,16 +270,23 @@ selectionMode: "auto",
     console.log("💾 Transaction complete");
 
     res.json({
-      success: true,
-      status: "completed",
-      provider: providerUsed,
-      latency: result.latency || 0,
-      transactionId: result.id || null,
-      amount,
-      currency,
-      balance: updatedUser.balance,
-      fraud: fraudResult,
-    });
+  success: true,
+  status: "completed",
+  provider: providerUsed,
+  latency: result.latency || 0,
+  transactionId: result.id || null,
+  amount,
+  currency,
+  balance: updatedUser.balance,
+  fraud: fraudResult,
+  routing: {
+    recommendedProvider: routingExplanation.recommendedProvider,
+    selectedProvider: providerUsed,
+    attemptOrder: providerOrder,
+    rankedProviders: routingExplanation.rankedProviders,
+    reasonSummary: routingExplanation.reasonSummary,
+  },
+});
   } catch (error) {
     console.log("🔥 FULL ERROR:", error);
     res.status(500).json({
