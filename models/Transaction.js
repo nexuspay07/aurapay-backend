@@ -48,6 +48,18 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       default: "stripe",
     },
+    recommendedProvider: {
+      type: String,
+      default: null,
+    },
+    attemptOrder: {
+      type: [String],
+      default: [],
+    },
+    selectionMode: {
+      type: String,
+      default: "manual",
+    },
   },
   { timestamps: true }
 );

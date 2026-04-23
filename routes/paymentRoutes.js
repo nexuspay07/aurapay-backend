@@ -17,6 +17,7 @@ const { detectFraud } = require("../services/fraudService");
 const { getProviderStats } = require("../services/metricsService");
 const { updateUserProfile } = require("../services/riskProfileService");
 const { processTransactionFeedback } = require("../services/feedbackService");
+const { buildProviderOrder } = require("../services/dynamicRoutingService");
 const { applyDefense } = require("../services/defenseService");
 
 const round = (num) => Math.round(num * 100) / 100;
@@ -159,7 +160,12 @@ router.post("/pay", auth, async (req, res) => {
     // ==================================================
     // 🚀 AUTO ROUTING + FALLBACK
     // ==================================================
-    const providers = ["stripe", "paypal"];
+    const stats = await getProviderStats();
+const providerOrder = buildProviderOrder(stats, amount);
+
+console.log("🧠 Dynamic provider order:", providerOrder);
+
+const providers = providerOrder.map((p) => p.toLowerCase());
     let lastError = null;
     let result = null;
     let providerUsed = null;
@@ -243,6 +249,9 @@ router.post("/pay", auth, async (req, res) => {
       attempts,
       errorMessage: result.error || null,
       success: true,
+      recommendedProvider: providerOrder[0],
+attemptOrder: providerOrder,
+selectionMode: "auto",
     });
 
     await updateUserProfile(req.user._id, amount, currency);
