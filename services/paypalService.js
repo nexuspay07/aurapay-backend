@@ -32,4 +32,20 @@ async function payWithPayPal(data) {
   }
 }
 
+async function payWithPayPal({ amount, currency = "usd" }) {
+  try {
+    // Simulated PayPal success for now
+    return {
+      success: true,
+      status: "completed",
+      latency: 800, // simulate PayPal being slower
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message,
+    };
+  }
+}
+
 module.exports = { payWithPayPal };

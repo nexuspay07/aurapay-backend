@@ -7,12 +7,10 @@ const Transaction = require("../models/Transaction");
 const User = require("../models/User");
 const FraudLog = require("../models/FraudLog");
 
-const measureExecution = require("../utils/measure");
 const auth = require("../middlewares/auth");
 
 const { payWithStripe } = require("../services/stripeService");
 const { payWithPayPal } = require("../services/paypalService");
-const { chooseBestProvider } = require("../services/routingService");
 const { convert } = require("../services/fxservice");
 
 const { detectFraud } = require("../services/fraudService");
@@ -46,50 +44,43 @@ router.post("/pay", auth, async (req, res) => {
   const data = req.body;
 
   try {
-    let result;
-    let providerUsed;
-    let attempts = 1;
-
     const amount = Number(data.amount);
     const currency = String(data.currency || "").toLowerCase();
 
     // ==================================================
-    // 🔒 PHASE 26 — BASIC PRODUCTION SAFETY
+    // 🔒 BASIC PRODUCTION SAFETY
     // ==================================================
 
-    // 1. Validate amount
     if (!amount || Number.isNaN(amount) || amount <= 0) {
       return res.status(400).json({
         error: "Invalid amount",
       });
     }
 
-    // 2. Validate supported currencies
     if (!["usd", "eur"].includes(currency)) {
       return res.status(400).json({
         error: "Unsupported currency",
       });
     }
 
-    // 3. Max payment protection
     if (amount > MAX_PAYMENT_LIMIT) {
       return res.status(400).json({
         error: `Amount exceeds maximum limit (${MAX_PAYMENT_LIMIT})`,
       });
     }
 
-    // 4. Validate user balance object exists
     if (!req.user.balance || typeof req.user.balance !== "object") {
       return res.status(400).json({
         error: "User wallet is not configured properly",
       });
     }
 
-    // 5. Ensure missing balances default to 0
     const currentUsd = Number(req.user.balance.usd || 0);
     const currentEur = Number(req.user.balance.eur || 0);
 
-    // 🛡️ fraud detection
+    // ==================================================
+    // 🛡️ FRAUD DETECTION
+    // ==================================================
     const fraudResult = await detectFraud(req.user, {
       ...data,
       amount,
@@ -133,18 +124,18 @@ router.post("/pay", auth, async (req, res) => {
       console.log("⚠️ Suspicious transaction:", fraudResult.reasons);
     }
 
-    // 💰 balance check
+    // ==================================================
+    // 💰 BALANCE CHECK
+    // ==================================================
     let usedConverted = false;
 
-    const currentBalance =
-      currency === "usd" ? currentUsd : currentEur;
+    const currentBalance = currency === "usd" ? currentUsd : currentEur;
 
     if (currentBalance >= amount) {
       console.log("✅ Enough balance");
     } else {
       const otherCurrency = currency === "usd" ? "eur" : "usd";
-      const otherBalance =
-        otherCurrency === "usd" ? currentUsd : currentEur;
+      const otherBalance = otherCurrency === "usd" ? currentUsd : currentEur;
 
       const converted = convert(otherBalance, otherCurrency, currency);
 
@@ -165,51 +156,46 @@ router.post("/pay", auth, async (req, res) => {
       }
     }
 
-    // 🧠 routing
-    const bestProvider = await chooseBestProvider(currency);
-    console.log("🧠 AI Routing chose:", bestProvider);
+    // ==================================================
+    // 🚀 AUTO ROUTING + FALLBACK
+    // ==================================================
+    const providers = ["stripe", "paypal"];
+    let lastError = null;
+    let result = null;
+    let providerUsed = null;
+    let attempts = 0;
 
-    if (bestProvider === "Stripe") {
-      result = await measureExecution(() => payWithStripe({
-        ...data,
-        amount,
-        currency,
-      }));
-      providerUsed = "Stripe";
-    } else {
-      result = await measureExecution(() => payWithPayPal({
-        ...data,
-        amount,
-        currency,
-      }));
-      providerUsed = "PayPal";
-    }
-
-    console.log("📊 First attempt:", result);
-
-    // 🔁 fallback
-    if (!result.success) {
+    for (const provider of providers) {
       attempts++;
 
-      if (providerUsed === "Stripe") {
-        result = await measureExecution(() => payWithPayPal({
-          ...data,
-          amount,
-          currency,
-        }));
-        providerUsed = "PayPal";
-      } else {
-        result = await measureExecution(() => payWithStripe({
-          ...data,
-          amount,
-          currency,
-        }));
-        providerUsed = "Stripe";
+      try {
+        console.log(`🚀 Trying provider: ${provider}`);
+
+        if (provider === "stripe") {
+          result = await payWithStripe({ amount, currency });
+        } else if (provider === "paypal") {
+          result = await payWithPayPal({ amount, currency });
+        }
+
+        console.log(`📊 Result from ${provider}:`, result);
+
+        if (result?.success) {
+          providerUsed = provider.charAt(0).toUpperCase() + provider.slice(1);
+          console.log(`✅ SUCCESS via ${providerUsed}`);
+          break;
+        }
+
+        lastError = result?.error || "Unknown failure";
+      } catch (err) {
+        console.log(`❌ ${provider} failed:`, err.message);
+        lastError = err.message;
       }
     }
 
-    // ❌ final failure
-    if (!result.success) {
+    // ==================================================
+    // ❌ ALL PROVIDERS FAILED
+    // ==================================================
+    if (!result?.success) {
       if (usedConverted) {
         const otherCurrency = currency === "usd" ? "eur" : "usd";
         const refund = round(convert(amount, currency, otherCurrency));
@@ -228,13 +214,16 @@ router.post("/pay", auth, async (req, res) => {
         provider: providerUsed,
       });
 
-      return res.status(400).json({
-        status: "failed",
-        error: result.error || "Payment failed",
+      return res.status(500).json({
+        success: false,
+        error: "All providers failed",
+        details: lastError,
       });
     }
 
-    // 💰 final deduction
+    // ==================================================
+    // 💰 FINAL DEDUCTION
+    // ==================================================
     if (!usedConverted) {
       await User.findByIdAndUpdate(req.user._id, {
         $inc: { [`balance.${currency}`]: -amount },
@@ -248,8 +237,8 @@ router.post("/pay", auth, async (req, res) => {
       amount,
       currency,
       provider: providerUsed,
-      transactionId: result.id,
-      status: result.status,
+      transactionId: result.id || null,
+      status: result.status || "completed",
       latency: result.latency || 0,
       attempts,
       errorMessage: result.error || null,
@@ -270,15 +259,16 @@ router.post("/pay", auth, async (req, res) => {
     console.log("💾 Transaction complete");
 
     res.json({
-  status: "completed",
-  provider: providerUsed,
-  latency: result.latency,
-  transactionId: result.id,
-  amount,
-  currency,
-  balance: updatedUser.balance,
-  fraud: fraudResult,
-});
+      success: true,
+      status: "completed",
+      provider: providerUsed,
+      latency: result.latency || 0,
+      transactionId: result.id || null,
+      amount,
+      currency,
+      balance: updatedUser.balance,
+      fraud: fraudResult,
+    });
   } catch (error) {
     console.log("🔥 FULL ERROR:", error);
     res.status(500).json({
