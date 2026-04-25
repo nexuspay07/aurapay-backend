@@ -264,7 +264,10 @@ selectionMode: "auto",
       fraud: false,
       fraudDecision: fraudResult?.decision || "APPROVE",
       amount,
-      provider: providerUsed,
+      provider:
+  providerUsed?.toLowerCase() === "paypal"
+    ? "PayPal"
+    : "Stripe",
     });
 
     console.log("💾 Transaction complete");
@@ -306,8 +309,25 @@ router.get("/intelligence", async (req, res) => {
   try {
     const stats = await Transaction.aggregate([
       {
+        $addFields: {
+          normalizedProvider: {
+            $cond: [
+              { $eq: [{ $toLower: "$provider" }, "paypal"] },
+              "PayPal",
+              {
+                $cond: [
+                  { $eq: [{ $toLower: "$provider" }, "stripe"] },
+                  "Stripe",
+                  "Unknown",
+                ],
+              },
+            ],
+          },
+        },
+      },
+      {
         $group: {
-          _id: "$provider",
+          _id: "$normalizedProvider",
           totalPayments: { $sum: 1 },
           successCount: {
             $sum: {
