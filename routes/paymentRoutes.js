@@ -303,8 +303,47 @@ router.get("/transactions", auth, async (req, res) => {
 });
 
 router.get("/intelligence", async (req, res) => {
-  const stats = await getProviderStats();
-  res.json(stats);
+  try {
+    const stats = await Transaction.aggregate([
+      {
+        $group: {
+          _id: "$provider",
+          totalPayments: { $sum: 1 },
+          successCount: {
+            $sum: {
+              $cond: [{ $eq: ["$success", true] }, 1, 0],
+            },
+          },
+          avgLatency: { $avg: "$latency" },
+          totalVolume: { $sum: "$amount" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          provider: "$_id",
+          totalPayments: 1,
+          totalVolume: 1,
+          successRate: {
+            $cond: [
+              { $gt: ["$totalPayments", 0] },
+              { $multiply: [{ $divide: ["$successCount", "$totalPayments"] }, 100] },
+              0,
+            ],
+          },
+          avgLatency: { $round: ["$avgLatency", 0] },
+        },
+      },
+      {
+        $sort: { totalPayments: -1 },
+      },
+    ]);
+
+    res.json(stats);
+  } catch (err) {
+    console.log("❌ INTELLIGENCE ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get("/fraud-logs", auth, async (req, res) => {
