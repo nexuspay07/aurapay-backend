@@ -31,6 +31,7 @@ async function getDynamicProviderOrder(userId, amount) {
     .limit(50);
 
   const providers = ["Stripe", "PayPal"];
+  const now = Date.now();
 
   const ranked = providers.map((provider) => {
     const txs = recentTx.filter(
@@ -39,66 +40,94 @@ async function getDynamicProviderOrder(userId, amount) {
     );
 
     if (txs.length === 0) {
-      let coldStartScore = 50;
-
-      if (amount >= 1000 && provider === "PayPal") coldStartScore += 5;
-      if (amount < 1000 && provider === "Stripe") coldStartScore += 5;
-
       return {
         provider,
-        score: coldStartScore,
+        score: 40, // lower cold start
         successRate: 0,
         avgLatency: 0,
-        count: 0,
-        reason: "No recent data yet. Using cold-start routing preference.",
+        confidence: 0,
+        reason: "No data → conservative default score",
       };
     }
 
+    // =========================
+    // RECENCY WEIGHTING
+    // =========================
+    let weightedSuccess = 0;
+    let weightedLatency = 0;
+    let totalWeight = 0;
+
+    txs.forEach((tx, index) => {
+      const ageMinutes =
+        (now - new Date(tx.createdAt).getTime()) / (1000 * 60);
+
+      // 🔥 decay factor (newer tx = higher weight)
+      const decay = Math.exp(-ageMinutes / 60); // 1 hour half-life
+
+      const weight = decay;
+
+      totalWeight += weight;
+
+      if (tx.success) {
+        weightedSuccess += weight;
+      }
+
+      weightedLatency += weight * Number(tx.latency || 0);
+    });
+
     const successRate =
-      txs.filter((tx) => tx.success === true).length / txs.length;
+      totalWeight > 0 ? weightedSuccess / totalWeight : 0;
 
     const avgLatency =
-      txs.reduce((sum, tx) => sum + Number(tx.latency || 0), 0) / txs.length;
+      totalWeight > 0 ? weightedLatency / totalWeight : 0;
 
-    let score = successRate * 100 - avgLatency / 100;
+    // =========================
+    // CONFIDENCE SCORE
+    // =========================
+    const confidence = Math.min(1, txs.length / 10); // max confidence at 10 tx
 
-    const reasons = [
-      `Recent success rate: ${(successRate * 100).toFixed(1)}%`,
-      `Recent average latency: ${avgLatency.toFixed(0)} ms`,
-    ];
+    // =========================
+    // FINAL SCORE
+    // =========================
+    let score =
+      successRate * 100 * confidence - avgLatency / 100;
 
+    // =========================
+    // CONTEXT BONUS
+    // =========================
     if (amount >= 1000 && provider === "PayPal") {
       score += 5;
-      reasons.push("Large-amount routing bonus applied.");
     }
 
     if (amount < 1000 && provider === "Stripe") {
       score += 5;
-      reasons.push("Small-amount speed bonus applied.");
     }
 
     return {
       provider,
       score,
-      successRate: successRate * 100,
-      avgLatency,
+      successRate: (successRate * 100).toFixed(1),
+      avgLatency: avgLatency.toFixed(0),
+      confidence: confidence.toFixed(2),
       count: txs.length,
-      reason: reasons.join(" "),
+      reason: `
+        Success: ${(successRate * 100).toFixed(1)}%
+        Latency: ${avgLatency.toFixed(0)} ms
+        Confidence: ${(confidence * 100).toFixed(0)}%
+        (Recency weighted)
+      `,
     };
   });
 
   ranked.sort((a, b) => b.score - a.score);
 
   return {
-    providerOrder: ranked.map((item) => item.provider),
+    providerOrder: ranked.map((p) => p.provider),
     rankedProviders: ranked,
-    recommendedProvider: ranked[0]?.provider || "Stripe",
-    reasonSummary:
-      ranked[0]?.reason ||
-      "Provider selected using recent transaction performance.",
+    recommendedProvider: ranked[0]?.provider,
+    reasonSummary: "Recency + confidence weighted routing applied",
   };
 }
-
 router.get("/test", (req, res) => {
   res.send("✅ payment route works");
 });
