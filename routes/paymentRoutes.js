@@ -17,11 +17,87 @@ const { detectFraud } = require("../services/fraudService");
 const { getProviderStats } = require("../services/metricsService");
 const { updateUserProfile } = require("../services/riskProfileService");
 const { processTransactionFeedback } = require("../services/feedbackService");
-const { buildRoutingExplanation } = require("../services/dynamicRoutingService");
 const { applyDefense } = require("../services/defenseService");
 
 const round = (num) => Math.round(num * 100) / 100;
 const MAX_PAYMENT_LIMIT = 10000;
+
+// ==================================================
+// PHASE 36 — DYNAMIC RECENCY-BASED PROVIDER RANKING
+// ==================================================
+async function getDynamicProviderOrder(userId, amount) {
+  const recentTx = await Transaction.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .limit(50);
+
+  const providers = ["Stripe", "PayPal"];
+
+  const ranked = providers.map((provider) => {
+    const txs = recentTx.filter(
+      (tx) =>
+        String(tx.provider || "").toLowerCase() === provider.toLowerCase()
+    );
+
+    if (txs.length === 0) {
+      let coldStartScore = 50;
+
+      if (amount >= 1000 && provider === "PayPal") coldStartScore += 5;
+      if (amount < 1000 && provider === "Stripe") coldStartScore += 5;
+
+      return {
+        provider,
+        score: coldStartScore,
+        successRate: 0,
+        avgLatency: 0,
+        count: 0,
+        reason: "No recent data yet. Using cold-start routing preference.",
+      };
+    }
+
+    const successRate =
+      txs.filter((tx) => tx.success === true).length / txs.length;
+
+    const avgLatency =
+      txs.reduce((sum, tx) => sum + Number(tx.latency || 0), 0) / txs.length;
+
+    let score = successRate * 100 - avgLatency / 100;
+
+    const reasons = [
+      `Recent success rate: ${(successRate * 100).toFixed(1)}%`,
+      `Recent average latency: ${avgLatency.toFixed(0)} ms`,
+    ];
+
+    if (amount >= 1000 && provider === "PayPal") {
+      score += 5;
+      reasons.push("Large-amount routing bonus applied.");
+    }
+
+    if (amount < 1000 && provider === "Stripe") {
+      score += 5;
+      reasons.push("Small-amount speed bonus applied.");
+    }
+
+    return {
+      provider,
+      score,
+      successRate: successRate * 100,
+      avgLatency,
+      count: txs.length,
+      reason: reasons.join(" "),
+    };
+  });
+
+  ranked.sort((a, b) => b.score - a.score);
+
+  return {
+    providerOrder: ranked.map((item) => item.provider),
+    rankedProviders: ranked,
+    recommendedProvider: ranked[0]?.provider || "Stripe",
+    reasonSummary:
+      ranked[0]?.reason ||
+      "Provider selected using recent transaction performance.",
+  };
+}
 
 router.get("/test", (req, res) => {
   res.send("✅ payment route works");
@@ -49,19 +125,14 @@ router.post("/pay", auth, async (req, res) => {
     const currency = String(data.currency || "").toLowerCase();
 
     // ==================================================
-    // 🔒 BASIC PRODUCTION SAFETY
+    // BASIC PRODUCTION SAFETY
     // ==================================================
-
     if (!amount || Number.isNaN(amount) || amount <= 0) {
-      return res.status(400).json({
-        error: "Invalid amount",
-      });
+      return res.status(400).json({ error: "Invalid amount" });
     }
 
     if (!["usd", "eur"].includes(currency)) {
-      return res.status(400).json({
-        error: "Unsupported currency",
-      });
+      return res.status(400).json({ error: "Unsupported currency" });
     }
 
     if (amount > MAX_PAYMENT_LIMIT) {
@@ -80,7 +151,7 @@ router.post("/pay", auth, async (req, res) => {
     const currentEur = Number(req.user.balance.eur || 0);
 
     // ==================================================
-    // 🛡️ FRAUD DETECTION
+    // FRAUD DETECTION
     // ==================================================
     const fraudResult = await detectFraud(req.user, {
       ...data,
@@ -102,7 +173,6 @@ router.post("/pay", auth, async (req, res) => {
 
     if (fraudResult.decision === "BLOCK") {
       const defense = await applyDefense(req.user, fraudResult);
-      console.log("🛡️ Defense Action:", defense);
 
       await processTransactionFeedback({
         user: req.user._id,
@@ -121,28 +191,18 @@ router.post("/pay", auth, async (req, res) => {
       });
     }
 
-    if (fraudResult.decision === "FLAG") {
-      console.log("⚠️ Suspicious transaction:", fraudResult.reasons);
-    }
-
     // ==================================================
-    // 💰 BALANCE CHECK
+    // BALANCE CHECK
     // ==================================================
     let usedConverted = false;
-
     const currentBalance = currency === "usd" ? currentUsd : currentEur;
 
-    if (currentBalance >= amount) {
-      console.log("✅ Enough balance");
-    } else {
+    if (currentBalance < amount) {
       const otherCurrency = currency === "usd" ? "eur" : "usd";
       const otherBalance = otherCurrency === "usd" ? currentUsd : currentEur;
-
       const converted = convert(otherBalance, otherCurrency, currency);
 
       if (converted >= amount) {
-        console.log("💱 Using converted balance");
-
         const needed = round(convert(amount, currency, otherCurrency));
 
         await User.findByIdAndUpdate(req.user._id, {
@@ -151,23 +211,26 @@ router.post("/pay", auth, async (req, res) => {
 
         usedConverted = true;
       } else {
-        return res.status(400).json({
-          error: "Insufficient balance",
-        });
+        return res.status(400).json({ error: "Insufficient balance" });
       }
     }
 
     // ==================================================
-    // 🚀 AUTO ROUTING + FALLBACK
+    // PHASE 36 — DYNAMIC ROUTING + FALLBACK
     // ==================================================
-    const stats = await getProviderStats();
-const routingExplanation = buildRoutingExplanation(stats, amount);
-const providerOrder = routingExplanation.providerOrder;
+    const routingExplanation = await getDynamicProviderOrder(
+      req.user._id,
+      amount
+    );
 
-console.log("🧠 Dynamic provider order:", providerOrder);
-console.log("🧠 Routing explanation:", routingExplanation);
+    const providerOrder = routingExplanation.providerOrder;
+    const providers = providerOrder.map((provider) =>
+      provider.toLowerCase()
+    );
 
-const providers = providerOrder.map((p) => p.toLowerCase());
+    console.log("🧠 Phase 36 provider order:", providerOrder);
+    console.log("🧠 Phase 36 routing explanation:", routingExplanation);
+
     let lastError = null;
     let result = null;
     let providerUsed = null;
@@ -188,12 +251,12 @@ const providers = providerOrder.map((p) => p.toLowerCase());
         console.log(`📊 Result from ${provider}:`, result);
 
         if (result?.success) {
-          providerUsed = provider.charAt(0).toUpperCase() + provider.slice(1);
+          providerUsed = provider === "paypal" ? "PayPal" : "Stripe";
           console.log(`✅ SUCCESS via ${providerUsed}`);
           break;
         }
 
-        lastError = result?.error || "Unknown failure";
+        lastError = result?.error || "Unknown provider failure";
       } catch (err) {
         console.log(`❌ ${provider} failed:`, err.message);
         lastError = err.message;
@@ -201,7 +264,7 @@ const providers = providerOrder.map((p) => p.toLowerCase());
     }
 
     // ==================================================
-    // ❌ ALL PROVIDERS FAILED
+    // ALL PROVIDERS FAILED
     // ==================================================
     if (!result?.success) {
       if (usedConverted) {
@@ -226,11 +289,12 @@ const providers = providerOrder.map((p) => p.toLowerCase());
         success: false,
         error: "All providers failed",
         details: lastError,
+        routing: routingExplanation,
       });
     }
 
     // ==================================================
-    // 💰 FINAL DEDUCTION
+    // FINAL DEDUCTION
     // ==================================================
     if (!usedConverted) {
       await User.findByIdAndUpdate(req.user._id, {
@@ -251,9 +315,9 @@ const providers = providerOrder.map((p) => p.toLowerCase());
       attempts,
       errorMessage: result.error || null,
       success: true,
-      recommendedProvider: providerOrder[0],
-attemptOrder: providerOrder,
-selectionMode: "auto",
+      recommendedProvider: routingExplanation.recommendedProvider,
+      attemptOrder: providerOrder,
+      selectionMode: "auto",
     });
 
     await updateUserProfile(req.user._id, amount, currency);
@@ -264,32 +328,31 @@ selectionMode: "auto",
       fraud: false,
       fraudDecision: fraudResult?.decision || "APPROVE",
       amount,
-      provider:
-  providerUsed?.toLowerCase() === "paypal"
-    ? "PayPal"
-    : "Stripe",
+      provider: providerUsed,
     });
 
     console.log("💾 Transaction complete");
 
     res.json({
-  success: true,
-  status: "completed",
-  provider: providerUsed,
-  latency: result.latency || 0,
-  transactionId: result.id || null,
-  amount,
-  currency,
-  balance: updatedUser.balance,
-  fraud: fraudResult,
-  routing: {
-    recommendedProvider: routingExplanation.recommendedProvider,
-    selectedProvider: providerUsed,
-    attemptOrder: providerOrder,
-    rankedProviders: routingExplanation.rankedProviders,
-    reasonSummary: routingExplanation.reasonSummary,
-  },
-});
+      success: true,
+      status: "completed",
+      provider: providerUsed,
+      latency: result.latency || 0,
+      transactionId: result.id || null,
+      amount,
+      currency,
+      balance: updatedUser.balance,
+      fraud: fraudResult,
+      attempts,
+      rankingUsed: providers,
+      routing: {
+        recommendedProvider: routingExplanation.recommendedProvider,
+        selectedProvider: providerUsed,
+        attemptOrder: providerOrder,
+        rankedProviders: routingExplanation.rankedProviders,
+        reasonSummary: routingExplanation.reasonSummary,
+      },
+    });
   } catch (error) {
     console.log("🔥 FULL ERROR:", error);
     res.status(500).json({
@@ -347,11 +410,21 @@ router.get("/intelligence", async (req, res) => {
           successRate: {
             $cond: [
               { $gt: ["$totalPayments", 0] },
-              { $multiply: [{ $divide: ["$successCount", "$totalPayments"] }, 100] },
+              {
+                $multiply: [
+                  { $divide: ["$successCount", "$totalPayments"] },
+                  100,
+                ],
+              },
               0,
             ],
           },
           avgLatency: { $round: ["$avgLatency", 0] },
+        },
+      },
+      {
+        $match: {
+          provider: { $ne: "Unknown" },
         },
       },
       {
