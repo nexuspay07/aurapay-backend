@@ -13,11 +13,13 @@ router.get("/", auth, async (req, res) => {
 
     for (const provider of providers) {
       const providerTx = transactions.filter(
-        (tx) => String(tx.provider || "").toLowerCase() === provider.toLowerCase()
+        (tx) =>
+          String(tx.provider || "").toLowerCase() === provider.toLowerCase()
       );
 
       const totalCount = providerTx.length;
       const successCount = providerTx.filter((tx) => tx.success === true).length;
+
       const totalVolume = providerTx.reduce(
         (sum, tx) => sum + Number(tx.amount || 0),
         0
@@ -35,31 +37,64 @@ router.get("/", auth, async (req, res) => {
       const successRate =
         totalCount > 0 ? (successCount / totalCount) * 100 : 0;
 
+      const reliabilityScore =
+        successRate - avgLatency / 100;
+
       analytics[provider] = {
         totalCount,
         successCount,
         totalVolume,
         avgLatency,
         successRate,
+        reliabilityScore,
       };
     }
 
-    // ✅ Simple recommendation logic
-    let recommendedProvider = "Stripe";
+    const totalTransactions = transactions.length;
 
-    const stripeScore =
-      (analytics.Stripe?.successRate || 0) - (analytics.Stripe?.avgLatency || 0) / 1000;
+    const totalAttempts = transactions.reduce(
+      (sum, tx) => sum + Number(tx.attempts || 1),
+      0
+    );
 
-    const paypalScore =
-      (analytics.PayPal?.successRate || 0) - (analytics.PayPal?.avgLatency || 0) / 1000;
+    const fallbackTransactions = transactions.filter(
+      (tx) => Number(tx.attempts || 1) > 1
+    );
 
-    if (paypalScore > stripeScore) {
-      recommendedProvider = "PayPal";
-    }
+    const fallbackRate =
+      totalTransactions > 0
+        ? (fallbackTransactions.length / totalTransactions) * 100
+        : 0;
+
+    const avgAttempts =
+      totalTransactions > 0 ? totalAttempts / totalTransactions : 0;
+
+    const mostUsedProvider =
+      analytics.Stripe.totalCount >= analytics.PayPal.totalCount
+        ? "Stripe"
+        : "PayPal";
+
+    const fastestProvider =
+      analytics.Stripe.avgLatency <= analytics.PayPal.avgLatency
+        ? "Stripe"
+        : "PayPal";
+
+    const recommendedProvider =
+      analytics.Stripe.reliabilityScore >= analytics.PayPal.reliabilityScore
+        ? "Stripe"
+        : "PayPal";
 
     res.json({
       analytics,
       recommendedProvider,
+      routingPerformance: {
+        totalTransactions,
+        fallbackCount: fallbackTransactions.length,
+        fallbackRate,
+        avgAttempts,
+        mostUsedProvider,
+        fastestProvider,
+      },
     });
   } catch (err) {
     console.error("❌ PROVIDER ANALYTICS ERROR:", err);
