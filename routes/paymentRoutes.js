@@ -139,14 +139,18 @@ if (amount < 1000 && provider === "Stripe") {
       historyScore += 5;
     }
 
-    const score =
-      reliabilityScore +
-      speedScore +
-      confidenceScore +
-      riskScore +
-      amountScore +
-      historyScore;
+    let score =
+  reliabilityScore +
+  speedScore +
+  confidenceScore +
+  riskScore +
+  amountScore +
+  historyScore;
 
+// 🔥 FORCE RULE FOR LARGE PAYMENTS
+if (amount >= 1000 && provider === "PayPal") {
+  score += 100; // GUARANTEED win
+}
     return {
       provider,
       score,
