@@ -14,7 +14,6 @@ const { payWithPayPal } = require("../services/paypalService");
 const { convert } = require("../services/fxservice");
 
 const { detectFraud } = require("../services/fraudService");
-const { getProviderStats } = require("../services/metricsService");
 const { updateUserProfile } = require("../services/riskProfileService");
 const { processTransactionFeedback } = require("../services/feedbackService");
 const { applyDefense } = require("../services/defenseService");
@@ -23,84 +22,102 @@ const round = (num) => Math.round(num * 100) / 100;
 const MAX_PAYMENT_LIMIT = 10000;
 
 // ==================================================
-// PHASE 36 — DYNAMIC RECENCY-BASED PROVIDER RANKING
+// PHASE 36.2 — PERSONALIZED ROUTING INTELLIGENCE
 // ==================================================
-async function getDynamicProviderOrder(userId, amount) {
+async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
   const recentTx = await Transaction.find({ user: userId })
     .sort({ createdAt: -1 })
     .limit(50);
 
   const providers = ["Stripe", "PayPal"];
   const now = Date.now();
+  const userRiskLevel = userProfile?.riskLevel || "low";
 
   const ranked = providers.map((provider) => {
     const txs = recentTx.filter(
-      (tx) =>
-        String(tx.provider || "").toLowerCase() === provider.toLowerCase()
+      (tx) => String(tx.provider || "").toLowerCase() === provider.toLowerCase()
     );
 
     if (txs.length === 0) {
+      let score = 40;
+      const reasons = ["No user-specific data. Using default routing."];
+
+      if (amount >= 1000 && provider === "PayPal") {
+        score += 5;
+        reasons.push("Large amount default bonus for PayPal.");
+      }
+
+      if (amount < 1000 && provider === "Stripe") {
+        score += 5;
+        reasons.push("Small amount default speed bonus for Stripe.");
+      }
+
       return {
         provider,
-        score: 40, // lower cold start
-        successRate: 0,
-        avgLatency: 0,
-        confidence: 0,
-        reason: "No data → conservative default score",
+        score,
+        successRate: "0.0",
+        avgLatency: "0",
+        confidence: "0.00",
+        count: 0,
+        reason: reasons.join(" | "),
       };
     }
 
-    // =========================
-    // RECENCY WEIGHTING
-    // =========================
     let weightedSuccess = 0;
     let weightedLatency = 0;
     let totalWeight = 0;
 
-    txs.forEach((tx, index) => {
-      const ageMinutes =
-        (now - new Date(tx.createdAt).getTime()) / (1000 * 60);
-
-      // 🔥 decay factor (newer tx = higher weight)
-      const decay = Math.exp(-ageMinutes / 60); // 1 hour half-life
-
-      const weight = decay;
+    txs.forEach((tx) => {
+      const createdAt = tx.createdAt ? new Date(tx.createdAt).getTime() : now;
+      const ageMinutes = Math.max(0, (now - createdAt) / (1000 * 60));
+      const weight = Math.exp(-ageMinutes / 60);
 
       totalWeight += weight;
 
-      if (tx.success) {
+      if (tx.success === true) {
         weightedSuccess += weight;
       }
 
       weightedLatency += weight * Number(tx.latency || 0);
     });
 
-    const successRate =
-      totalWeight > 0 ? weightedSuccess / totalWeight : 0;
+    const successRate = totalWeight > 0 ? weightedSuccess / totalWeight : 0;
+    const avgLatency = totalWeight > 0 ? weightedLatency / totalWeight : 0;
+    const confidence = Math.min(1, txs.length / 10);
 
-    const avgLatency =
-      totalWeight > 0 ? weightedLatency / totalWeight : 0;
+    let score = successRate * 100 * confidence - avgLatency / 100;
 
-    // =========================
-    // CONFIDENCE SCORE
-    // =========================
-    const confidence = Math.min(1, txs.length / 10); // max confidence at 10 tx
+    const reasons = [
+      `User success rate: ${(successRate * 100).toFixed(1)}%`,
+      `Avg latency: ${avgLatency.toFixed(0)} ms`,
+      `Confidence: ${(confidence * 100).toFixed(0)}%`,
+    ];
 
-    // =========================
-    // FINAL SCORE
-    // =========================
-    let score =
-      successRate * 100 * confidence - avgLatency / 100;
+    const userSuccessWithProvider = txs.filter((tx) => tx.success === true).length;
 
-    // =========================
-    // CONTEXT BONUS
-    // =========================
-    if (amount >= 1000 && provider === "PayPal") {
+    if (userSuccessWithProvider >= 3) {
       score += 5;
+      reasons.push("User has strong success history with this provider.");
+    }
+
+    if (userRiskLevel === "high" && provider === "PayPal") {
+      score += 5;
+      reasons.push("High-risk user → PayPal stability boost.");
+    }
+
+    if (userRiskLevel === "low" && provider === "Stripe") {
+      score += 3;
+      reasons.push("Low-risk user → Stripe speed preference.");
+    }
+
+    if (amount >= 1000 && provider === "PayPal") {
+      score += 3;
+      reasons.push("Large amount → PayPal reliability bonus.");
     }
 
     if (amount < 1000 && provider === "Stripe") {
-      score += 5;
+      score += 3;
+      reasons.push("Small amount → Stripe speed bonus.");
     }
 
     return {
@@ -110,24 +127,20 @@ async function getDynamicProviderOrder(userId, amount) {
       avgLatency: avgLatency.toFixed(0),
       confidence: confidence.toFixed(2),
       count: txs.length,
-      reason: `
-        Success: ${(successRate * 100).toFixed(1)}%
-        Latency: ${avgLatency.toFixed(0)} ms
-        Confidence: ${(confidence * 100).toFixed(0)}%
-        (Recency weighted)
-      `,
+      reason: reasons.join(" | "),
     };
   });
 
   ranked.sort((a, b) => b.score - a.score);
 
   return {
-    providerOrder: ranked.map((p) => p.provider),
+    providerOrder: ranked.map((item) => item.provider),
     rankedProviders: ranked,
-    recommendedProvider: ranked[0]?.provider,
-    reasonSummary: "Recency + confidence weighted routing applied",
+    recommendedProvider: ranked[0]?.provider || "Stripe",
+    reasonSummary: "Personalized + recency + confidence routing applied",
   };
 }
+
 router.get("/test", (req, res) => {
   res.send("✅ payment route works");
 });
@@ -153,9 +166,6 @@ router.post("/pay", auth, async (req, res) => {
     const amount = Number(data.amount);
     const currency = String(data.currency || "").toLowerCase();
 
-    // ==================================================
-    // BASIC PRODUCTION SAFETY
-    // ==================================================
     if (!amount || Number.isNaN(amount) || amount <= 0) {
       return res.status(400).json({ error: "Invalid amount" });
     }
@@ -179,9 +189,6 @@ router.post("/pay", auth, async (req, res) => {
     const currentUsd = Number(req.user.balance.usd || 0);
     const currentEur = Number(req.user.balance.eur || 0);
 
-    // ==================================================
-    // FRAUD DETECTION
-    // ==================================================
     const fraudResult = await detectFraud(req.user, {
       ...data,
       amount,
@@ -220,9 +227,6 @@ router.post("/pay", auth, async (req, res) => {
       });
     }
 
-    // ==================================================
-    // BALANCE CHECK
-    // ==================================================
     let usedConverted = false;
     const currentBalance = currency === "usd" ? currentUsd : currentEur;
 
@@ -244,21 +248,17 @@ router.post("/pay", auth, async (req, res) => {
       }
     }
 
-    // ==================================================
-    // PHASE 36 — DYNAMIC ROUTING + FALLBACK
-    // ==================================================
     const routingExplanation = await getDynamicProviderOrder(
       req.user._id,
-      amount
+      amount,
+      req.user
     );
 
     const providerOrder = routingExplanation.providerOrder;
-    const providers = providerOrder.map((provider) =>
-      provider.toLowerCase()
-    );
+    const providers = providerOrder.map((provider) => provider.toLowerCase());
 
-    console.log("🧠 Phase 36 provider order:", providerOrder);
-    console.log("🧠 Phase 36 routing explanation:", routingExplanation);
+    console.log("🧠 Phase 36.2 provider order:", providerOrder);
+    console.log("🧠 Phase 36.2 routing explanation:", routingExplanation);
 
     let lastError = null;
     let result = null;
@@ -266,7 +266,7 @@ router.post("/pay", auth, async (req, res) => {
     let attempts = 0;
 
     for (const provider of providers) {
-      attempts++;
+      attempts += 1;
 
       try {
         console.log(`🚀 Trying provider: ${provider}`);
@@ -275,6 +275,11 @@ router.post("/pay", auth, async (req, res) => {
           result = await payWithStripe({ amount, currency });
         } else if (provider === "paypal") {
           result = await payWithPayPal({ amount, currency });
+        } else {
+          result = {
+            success: false,
+            error: `Unsupported provider: ${provider}`,
+          };
         }
 
         console.log(`📊 Result from ${provider}:`, result);
@@ -292,9 +297,6 @@ router.post("/pay", auth, async (req, res) => {
       }
     }
 
-    // ==================================================
-    // ALL PROVIDERS FAILED
-    // ==================================================
     if (!result?.success) {
       if (usedConverted) {
         const otherCurrency = currency === "usd" ? "eur" : "usd";
@@ -322,9 +324,6 @@ router.post("/pay", auth, async (req, res) => {
       });
     }
 
-    // ==================================================
-    // FINAL DEDUCTION
-    // ==================================================
     if (!usedConverted) {
       await User.findByIdAndUpdate(req.user._id, {
         $inc: { [`balance.${currency}`]: -amount },
@@ -362,7 +361,7 @@ router.post("/pay", auth, async (req, res) => {
 
     console.log("💾 Transaction complete");
 
-    res.json({
+    return res.json({
       success: true,
       status: "completed",
       provider: providerUsed,
@@ -384,7 +383,7 @@ router.post("/pay", auth, async (req, res) => {
     });
   } catch (error) {
     console.log("🔥 FULL ERROR:", error);
-    res.status(500).json({
+    return res.status(500).json({
       error: error.message,
     });
   }
@@ -394,6 +393,7 @@ router.get("/transactions", auth, async (req, res) => {
   const data = await Transaction.find({ user: req.user._id }).sort({
     createdAt: -1,
   });
+
   res.json(data);
 });
 
@@ -472,6 +472,7 @@ router.get("/fraud-logs", auth, async (req, res) => {
   const logs = await FraudLog.find({ user: req.user._id }).sort({
     createdAt: -1,
   });
+
   res.json(logs);
 });
 
