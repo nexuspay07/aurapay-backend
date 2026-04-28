@@ -22,7 +22,7 @@ const round = (num) => Math.round(num * 100) / 100;
 const MAX_PAYMENT_LIMIT = 10000;
 
 // ==================================================
-// PHASE 36.2 — PERSONALIZED ROUTING INTELLIGENCE
+// PHASE 36.3 — MULTI-OBJECTIVE ROUTING OPTIMIZATION
 // ==================================================
 async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
   const recentTx = await Transaction.find({ user: userId })
@@ -39,18 +39,24 @@ async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
     );
 
     if (txs.length === 0) {
-      let score = 40;
-      const reasons = ["No user-specific data. Using default routing."];
+      const reliabilityScore = 40;
+      const speedScore = 40;
+      const confidenceScore = 0;
 
-      if (amount >= 1000 && provider === "PayPal") {
-        score += 5;
-        reasons.push("Large amount default bonus for PayPal.");
-      }
+      let riskScore = 0;
+      let amountScore = 0;
 
-      if (amount < 1000 && provider === "Stripe") {
-        score += 5;
-        reasons.push("Small amount default speed bonus for Stripe.");
-      }
+      if (userRiskLevel === "high" && provider === "PayPal") riskScore += 20;
+      if (userRiskLevel === "low" && provider === "Stripe") riskScore += 10;
+      if (amount >= 1000 && provider === "PayPal") amountScore += 10;
+      if (amount < 1000 && provider === "Stripe") amountScore += 10;
+
+      const score =
+        reliabilityScore +
+        speedScore +
+        confidenceScore +
+        riskScore +
+        amountScore;
 
       return {
         provider,
@@ -59,7 +65,14 @@ async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
         avgLatency: "0",
         confidence: "0.00",
         count: 0,
-        reason: reasons.join(" | "),
+        reason: [
+          "No user-specific data. Using cold-start multi-objective routing.",
+          `Reliability: ${reliabilityScore.toFixed(1)}`,
+          `Speed Score: ${speedScore.toFixed(1)}`,
+          `Confidence: ${confidenceScore.toFixed(1)}`,
+          `Risk Score: ${riskScore}`,
+          `Amount Score: ${amountScore}`,
+        ].join(" | "),
       };
     }
 
@@ -85,40 +98,45 @@ async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
     const avgLatency = totalWeight > 0 ? weightedLatency / totalWeight : 0;
     const confidence = Math.min(1, txs.length / 10);
 
-    let score = successRate * 100 * confidence - avgLatency / 100;
+    // =========================
+    // MULTI-OBJECTIVE SCORING
+    // =========================
+    const reliabilityScore = successRate * 100;
+    const speedScore = Math.max(0, 100 - avgLatency / 10);
+    const confidenceScore = confidence * 50;
 
-    const reasons = [
-      `User success rate: ${(successRate * 100).toFixed(1)}%`,
-      `Avg latency: ${avgLatency.toFixed(0)} ms`,
-      `Confidence: ${(confidence * 100).toFixed(0)}%`,
-    ];
-
-    const userSuccessWithProvider = txs.filter((tx) => tx.success === true).length;
-
-    if (userSuccessWithProvider >= 3) {
-      score += 5;
-      reasons.push("User has strong success history with this provider.");
-    }
-
+    let riskScore = 0;
     if (userRiskLevel === "high" && provider === "PayPal") {
-      score += 5;
-      reasons.push("High-risk user → PayPal stability boost.");
+      riskScore += 20;
     }
-
     if (userRiskLevel === "low" && provider === "Stripe") {
-      score += 3;
-      reasons.push("Low-risk user → Stripe speed preference.");
+      riskScore += 10;
     }
 
+    let amountScore = 0;
     if (amount >= 1000 && provider === "PayPal") {
-      score += 3;
-      reasons.push("Large amount → PayPal reliability bonus.");
+      amountScore += 10;
+    }
+    if (amount < 1000 && provider === "Stripe") {
+      amountScore += 10;
     }
 
-    if (amount < 1000 && provider === "Stripe") {
-      score += 3;
-      reasons.push("Small amount → Stripe speed bonus.");
+    const userSuccessWithProvider = txs.filter(
+      (tx) => tx.success === true
+    ).length;
+
+    let historyScore = 0;
+    if (userSuccessWithProvider >= 3) {
+      historyScore += 5;
     }
+
+    const score =
+      reliabilityScore +
+      speedScore +
+      confidenceScore +
+      riskScore +
+      amountScore +
+      historyScore;
 
     return {
       provider,
@@ -127,7 +145,16 @@ async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
       avgLatency: avgLatency.toFixed(0),
       confidence: confidence.toFixed(2),
       count: txs.length,
-      reason: reasons.join(" | "),
+      reason: [
+        `Reliability: ${reliabilityScore.toFixed(1)}`,
+        `Speed Score: ${speedScore.toFixed(1)}`,
+        `Confidence: ${confidenceScore.toFixed(1)}`,
+        `Risk Score: ${riskScore}`,
+        `Amount Score: ${amountScore}`,
+        `History Score: ${historyScore}`,
+        `Recent success rate: ${(successRate * 100).toFixed(1)}%`,
+        `Recent avg latency: ${avgLatency.toFixed(0)} ms`,
+      ].join(" | "),
     };
   });
 
@@ -137,7 +164,8 @@ async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
     providerOrder: ranked.map((item) => item.provider),
     rankedProviders: ranked,
     recommendedProvider: ranked[0]?.provider || "Stripe",
-    reasonSummary: "Personalized + recency + confidence routing applied",
+    reasonSummary:
+      "Multi-objective routing applied: reliability + speed + confidence + risk + amount.",
   };
 }
 
@@ -257,8 +285,8 @@ router.post("/pay", auth, async (req, res) => {
     const providerOrder = routingExplanation.providerOrder;
     const providers = providerOrder.map((provider) => provider.toLowerCase());
 
-    console.log("🧠 Phase 36.2 provider order:", providerOrder);
-    console.log("🧠 Phase 36.2 routing explanation:", routingExplanation);
+    console.log("🧠 Phase 36.3 provider order:", providerOrder);
+    console.log("🧠 Phase 36.3 routing explanation:", routingExplanation);
 
     let lastError = null;
     let result = null;
