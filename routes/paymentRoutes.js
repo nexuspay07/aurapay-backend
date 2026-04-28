@@ -48,8 +48,13 @@ async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
 
       if (userRiskLevel === "high" && provider === "PayPal") riskScore += 20;
       if (userRiskLevel === "low" && provider === "Stripe") riskScore += 10;
-      if (amount >= 1000 && provider === "PayPal") amountScore += 10;
-      if (amount < 1000 && provider === "Stripe") amountScore += 10;
+     // STRONG amount weighting
+if (amount >= 1000 && provider === "PayPal") {
+  amountScore += 40; // 🔥 stronger for large payments
+}
+if (amount < 1000 && provider === "Stripe") {
+  amountScore += 20;
+}
 
       const score =
         reliabilityScore +
