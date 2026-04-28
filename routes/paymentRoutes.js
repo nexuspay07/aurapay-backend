@@ -51,6 +51,10 @@ async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
      // STRONG amount weighting
 if (amount >= 1000 && provider === "PayPal") {
   amountScore += 40; // 🔥 stronger for large payments
+
+console.log("🧠 AMOUNT:", amount);
+console.log("🧠 Provider:", provider);
+console.log("🧠 AmountScore:", amountScore);  
 }
 if (amount < 1000 && provider === "Stripe") {
   amountScore += 20;
