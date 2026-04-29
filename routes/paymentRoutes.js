@@ -14,6 +14,7 @@ const { payWithPayPal } = require("../services/paypalService");
 const { convert } = require("../services/fxservice");
 
 const { detectFraud } = require("../services/fraudService");
+const { estimateProviderFee } = require("../services/providerFeeService");
 const { updateUserProfile } = require("../services/riskProfileService");
 const { processTransactionFeedback } = require("../services/feedbackService");
 const { applyDefense } = require("../services/defenseService");
@@ -22,9 +23,9 @@ const round = (num) => Math.round(num * 100) / 100;
 const MAX_PAYMENT_LIMIT = 10000;
 
 // ==================================================
-// PHASE 36.3 — MULTI-OBJECTIVE ROUTING OPTIMIZATION
+// PHASE 36.4 — COST-AWARE MULTI-OBJECTIVE ROUTING
 // ==================================================
-async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
+async function getDynamicProviderOrder(userId, amount, currency = "usd", userProfile = {}) {
   const recentTx = await Transaction.find({ user: userId })
     .sort({ createdAt: -1 })
     .limit(50);
@@ -38,34 +39,36 @@ async function getDynamicProviderOrder(userId, amount, userProfile = {}) {
       (tx) => String(tx.provider || "").toLowerCase() === provider.toLowerCase()
     );
 
+    const feeEstimate = estimateProviderFee(provider, amount, currency);
+    const costScore = Math.max(0, 50 - feeEstimate.fee);
+
     if (txs.length === 0) {
       const reliabilityScore = 40;
       const speedScore = 40;
       const confidenceScore = 0;
+      const historyScore = 0;
 
       let riskScore = 0;
       let amountScore = 0;
 
       if (userRiskLevel === "high" && provider === "PayPal") riskScore += 20;
       if (userRiskLevel === "low" && provider === "Stripe") riskScore += 10;
-     // STRONG amount weighting
-if (amount >= 1000 && provider === "PayPal") {
-  amountScore += 40; // 🔥 stronger for large payments
 
-console.log("🧠 AMOUNT:", amount);
-console.log("🧠 Provider:", provider);
-console.log("🧠 AmountScore:", amountScore);  
-}
-if (amount < 1000 && provider === "Stripe") {
-  amountScore += 20;
-}
+      if (amount >= 1000 && provider === "PayPal") amountScore += 40;
+      if (amount < 1000 && provider === "Stripe") amountScore += 20;
 
-      const score =
+      let score =
         reliabilityScore +
         speedScore +
         confidenceScore +
         riskScore +
-        amountScore;
+        amountScore +
+        historyScore +
+        costScore;
+
+      if (amount >= 1000 && provider === "PayPal") {
+        score += 100;
+      }
 
       return {
         provider,
@@ -74,13 +77,20 @@ if (amount < 1000 && provider === "Stripe") {
         avgLatency: "0",
         confidence: "0.00",
         count: 0,
+        estimatedFee: feeEstimate.fee,
+        estimatedNet: feeEstimate.netAmount,
+        costScore: costScore.toFixed(1),
         reason: [
-          "No user-specific data. Using cold-start multi-objective routing.",
+          "No user-specific data. Using cold-start cost-aware routing.",
           `Reliability: ${reliabilityScore.toFixed(1)}`,
           `Speed Score: ${speedScore.toFixed(1)}`,
           `Confidence: ${confidenceScore.toFixed(1)}`,
           `Risk Score: ${riskScore}`,
           `Amount Score: ${amountScore}`,
+          `History Score: ${historyScore}`,
+          `Estimated Fee: $${feeEstimate.fee}`,
+          `Estimated Net: $${feeEstimate.netAmount}`,
+          `Cost Score: ${costScore.toFixed(1)}`,
         ].join(" | "),
       };
     }
@@ -107,9 +117,6 @@ if (amount < 1000 && provider === "Stripe") {
     const avgLatency = totalWeight > 0 ? weightedLatency / totalWeight : 0;
     const confidence = Math.min(1, txs.length / 10);
 
-    // =========================
-    // MULTI-OBJECTIVE SCORING
-    // =========================
     const reliabilityScore = successRate * 100;
     const speedScore = Math.max(0, 100 - avgLatency / 10);
     const confidenceScore = confidence * 50;
@@ -124,10 +131,10 @@ if (amount < 1000 && provider === "Stripe") {
 
     let amountScore = 0;
     if (amount >= 1000 && provider === "PayPal") {
-      amountScore += 10;
+      amountScore += 40;
     }
     if (amount < 1000 && provider === "Stripe") {
-      amountScore += 10;
+      amountScore += 20;
     }
 
     const userSuccessWithProvider = txs.filter(
@@ -140,17 +147,18 @@ if (amount < 1000 && provider === "Stripe") {
     }
 
     let score =
-  reliabilityScore +
-  speedScore +
-  confidenceScore +
-  riskScore +
-  amountScore +
-  historyScore;
+      reliabilityScore +
+      speedScore +
+      confidenceScore +
+      riskScore +
+      amountScore +
+      historyScore +
+      costScore;
 
-// 🔥 FORCE RULE FOR LARGE PAYMENTS
-if (amount >= 1000 && provider === "PayPal") {
-  score += 100; // GUARANTEED win
-}
+    if (amount >= 1000 && provider === "PayPal") {
+      score += 100;
+    }
+
     return {
       provider,
       score,
@@ -158,6 +166,9 @@ if (amount >= 1000 && provider === "PayPal") {
       avgLatency: avgLatency.toFixed(0),
       confidence: confidence.toFixed(2),
       count: txs.length,
+      estimatedFee: feeEstimate.fee,
+      estimatedNet: feeEstimate.netAmount,
+      costScore: costScore.toFixed(1),
       reason: [
         `Reliability: ${reliabilityScore.toFixed(1)}`,
         `Speed Score: ${speedScore.toFixed(1)}`,
@@ -165,6 +176,9 @@ if (amount >= 1000 && provider === "PayPal") {
         `Risk Score: ${riskScore}`,
         `Amount Score: ${amountScore}`,
         `History Score: ${historyScore}`,
+        `Estimated Fee: $${feeEstimate.fee}`,
+        `Estimated Net: $${feeEstimate.netAmount}`,
+        `Cost Score: ${costScore.toFixed(1)}`,
         `Recent success rate: ${(successRate * 100).toFixed(1)}%`,
         `Recent avg latency: ${avgLatency.toFixed(0)} ms`,
       ].join(" | "),
@@ -178,7 +192,7 @@ if (amount >= 1000 && provider === "PayPal") {
     rankedProviders: ranked,
     recommendedProvider: ranked[0]?.provider || "Stripe",
     reasonSummary:
-      "Multi-objective routing applied: reliability + speed + confidence + risk + amount.",
+      "Cost-aware multi-objective routing applied: reliability + speed + confidence + risk + amount + fees.",
   };
 }
 
@@ -292,14 +306,15 @@ router.post("/pay", auth, async (req, res) => {
     const routingExplanation = await getDynamicProviderOrder(
       req.user._id,
       amount,
+      currency,
       req.user
     );
 
     const providerOrder = routingExplanation.providerOrder;
     const providers = providerOrder.map((provider) => provider.toLowerCase());
 
-    console.log("🧠 Phase 36.3 provider order:", providerOrder);
-    console.log("🧠 Phase 36.3 routing explanation:", routingExplanation);
+    console.log("🧠 Phase 36.4 provider order:", providerOrder);
+    console.log("🧠 Phase 36.4 routing explanation:", routingExplanation);
 
     let lastError = null;
     let result = null;
@@ -373,6 +388,11 @@ router.post("/pay", auth, async (req, res) => {
 
     const updatedUser = await User.findById(req.user._id);
 
+    const selectedProviderFee =
+      routingExplanation.rankedProviders.find(
+        (item) => item.provider === providerUsed
+      ) || null;
+
     await Transaction.create({
       user: req.user._id,
       amount,
@@ -387,6 +407,9 @@ router.post("/pay", auth, async (req, res) => {
       recommendedProvider: routingExplanation.recommendedProvider,
       attemptOrder: providerOrder,
       selectionMode: "auto",
+      estimatedFee: selectedProviderFee?.estimatedFee || 0,
+      estimatedNet: selectedProviderFee?.estimatedNet || amount,
+      costScore: selectedProviderFee?.costScore || "0.0",
     });
 
     await updateUserProfile(req.user._id, amount, currency);
@@ -414,6 +437,9 @@ router.post("/pay", auth, async (req, res) => {
       fraud: fraudResult,
       attempts,
       rankingUsed: providers,
+      estimatedFee: selectedProviderFee?.estimatedFee || 0,
+      estimatedNet: selectedProviderFee?.estimatedNet || amount,
+      costScore: selectedProviderFee?.costScore || "0.0",
       routing: {
         recommendedProvider: routingExplanation.recommendedProvider,
         selectedProvider: providerUsed,
@@ -469,6 +495,8 @@ router.get("/intelligence", async (req, res) => {
           },
           avgLatency: { $avg: "$latency" },
           totalVolume: { $sum: "$amount" },
+          totalEstimatedFees: { $sum: "$estimatedFee" },
+          totalEstimatedNet: { $sum: "$estimatedNet" },
         },
       },
       {
@@ -477,6 +505,8 @@ router.get("/intelligence", async (req, res) => {
           provider: "$_id",
           totalPayments: 1,
           totalVolume: 1,
+          totalEstimatedFees: 1,
+          totalEstimatedNet: 1,
           successRate: {
             $cond: [
               { $gt: ["$totalPayments", 0] },
