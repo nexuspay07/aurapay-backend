@@ -12,6 +12,7 @@ const auth = require("../middlewares/auth");
 const { payWithStripe } = require("../services/stripeService");
 const { payWithPayPal } = require("../services/paypalService");
 const { convert } = require("../services/fxservice");
+const { calculateProfit } = require("../services/profitService");
 
 const { detectFraud } = require("../services/fraudService");
 const { estimateProviderFee } = require("../services/providerFeeService");
@@ -393,10 +394,18 @@ router.post("/pay", auth, async (req, res) => {
         (item) => item.provider === providerUsed
       ) || null;
 
+      const profitData = calculateProfit({
+  amount,
+  providerFee: selectedProviderFee?.estimatedFee || 0,
+});
+
     await Transaction.create({
       user: req.user._id,
       amount,
       currency,
+      platformFee: profitData.platformFee,
+      estimatedProfit: profitData.estimatedProfit,
+      profitMargin: profitData.profitMargin,
       provider: providerUsed,
       transactionId: result.id || null,
       status: result.status || "completed",
@@ -433,6 +442,7 @@ router.post("/pay", auth, async (req, res) => {
       transactionId: result.id || null,
       amount,
       currency,
+      profit: profitData,
       balance: updatedUser.balance,
       fraud: fraudResult,
       attempts,
