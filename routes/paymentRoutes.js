@@ -46,22 +46,22 @@ async function getDynamicProviderOrder(
     );
 
     const feeEstimate = estimateProviderFee(provider, amount, currency);
-    const costScore = Math.max(0, 50 - feeEstimate.fee);
+const costScore = Math.max(0, 50 - feeEstimate.fee);
 
-    const platformFeeRate = 0.01;
+// ✅ FIRST define profit
+const platformFeeRate = 0.01;
 const platformFee = amount * platformFeeRate;
 
+const estimatedProfit = platformFee - feeEstimate.fee;
+
+// ✅ THEN use it
 let profitScore = 0;
 
-// normalize profit impact
 if (estimatedProfit > 0) {
-  profitScore = Math.min(50, estimatedProfit); // reward profit
+  profitScore = Math.min(50, estimatedProfit);
 } else {
-  profitScore = Math.max(-50, estimatedProfit); // penalize loss
+  profitScore = Math.max(-50, estimatedProfit);
 }
-
-// 🔥 profit per provider
-const estimatedProfit = platformFee - feeEstimate.fee;
 
     if (txs.length === 0) {
       const reliabilityScore = 40;
