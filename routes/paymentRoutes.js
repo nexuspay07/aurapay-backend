@@ -54,14 +54,14 @@ const platformFee = amount * platformFeeRate;
 
 const estimatedProfit = platformFee - feeEstimate.fee;
 
-// ✅ THEN use it
-let profitScore = 0;
+// 🔥 STRONG profit weighting
+const PROFIT_WEIGHT = 2; // you can tune this later
 
-if (estimatedProfit > 0) {
-  profitScore = Math.min(50, estimatedProfit);
-} else {
-  profitScore = Math.max(-50, estimatedProfit);
-}
+let profitScore = estimatedProfit * PROFIT_WEIGHT;
+
+// clamp to avoid extremes
+if (profitScore > 100) profitScore = 100;
+if (profitScore < -100) profitScore = -100;
 
     if (txs.length === 0) {
       const reliabilityScore = 40;
@@ -75,7 +75,7 @@ if (estimatedProfit > 0) {
       if (userRiskLevel === "high" && provider === "PayPal") riskScore += 20;
       if (userRiskLevel === "low" && provider === "Stripe") riskScore += 10;
 
-      if (amount >= 1000 && provider === "PayPal") amountScore += 40;
+      amountScore += 15;
       if (amount < 1000 && provider === "Stripe") amountScore += 20;
 
       let score =
