@@ -48,6 +48,21 @@ async function getDynamicProviderOrder(
     const feeEstimate = estimateProviderFee(provider, amount, currency);
     const costScore = Math.max(0, 50 - feeEstimate.fee);
 
+    const platformFeeRate = 0.01;
+const platformFee = amount * platformFeeRate;
+
+let profitScore = 0;
+
+// normalize profit impact
+if (estimatedProfit > 0) {
+  profitScore = Math.min(50, estimatedProfit); // reward profit
+} else {
+  profitScore = Math.max(-50, estimatedProfit); // penalize loss
+}
+
+// 🔥 profit per provider
+const estimatedProfit = platformFee - feeEstimate.fee;
+
     if (txs.length === 0) {
       const reliabilityScore = 40;
       const speedScore = 40;
@@ -64,17 +79,15 @@ async function getDynamicProviderOrder(
       if (amount < 1000 && provider === "Stripe") amountScore += 20;
 
       let score =
-        reliabilityScore +
-        speedScore +
-        confidenceScore +
-        riskScore +
-        amountScore +
-        historyScore +
-        costScore;
+  reliabilityScore +
+  speedScore +
+  confidenceScore +
+  riskScore +
+  amountScore +
+  historyScore +
+  costScore +
+  profitScore;
 
-      if (amount >= 1000 && provider === "PayPal") {
-        score += 100;
-      }
 
       return {
         provider,
@@ -95,6 +108,8 @@ async function getDynamicProviderOrder(
           `Amount Score: ${amountScore}`,
           `History Score: ${historyScore}`,
           `Estimated Fee: $${feeEstimate.fee}`,
+          `Profit: ${estimatedProfit.toFixed(2)}`,
+`Profit Score: ${profitScore.toFixed(1)}`,
           `Estimated Net: $${feeEstimate.netAmount}`,
           `Cost Score: ${costScore.toFixed(1)}`,
         ].join(" | "),
