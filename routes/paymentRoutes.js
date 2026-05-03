@@ -24,9 +24,14 @@ const round = (num) => Math.round(num * 100) / 100;
 const MAX_PAYMENT_LIMIT = 10000;
 
 // ==================================================
-// PHASE 36.4 — COST-AWARE MULTI-OBJECTIVE ROUTING
+// PHASE 36.5 — COST + PROFIT-AWARE ROUTING
 // ==================================================
-async function getDynamicProviderOrder(userId, amount, currency = "usd", userProfile = {}) {
+async function getDynamicProviderOrder(
+  userId,
+  amount,
+  currency = "usd",
+  userProfile = {}
+) {
   const recentTx = await Transaction.find({ user: userId })
     .sort({ createdAt: -1 })
     .limit(50);
@@ -123,20 +128,12 @@ async function getDynamicProviderOrder(userId, amount, currency = "usd", userPro
     const confidenceScore = confidence * 50;
 
     let riskScore = 0;
-    if (userRiskLevel === "high" && provider === "PayPal") {
-      riskScore += 20;
-    }
-    if (userRiskLevel === "low" && provider === "Stripe") {
-      riskScore += 10;
-    }
+    if (userRiskLevel === "high" && provider === "PayPal") riskScore += 20;
+    if (userRiskLevel === "low" && provider === "Stripe") riskScore += 10;
 
     let amountScore = 0;
-    if (amount >= 1000 && provider === "PayPal") {
-      amountScore += 40;
-    }
-    if (amount < 1000 && provider === "Stripe") {
-      amountScore += 20;
-    }
+    if (amount >= 1000 && provider === "PayPal") amountScore += 40;
+    if (amount < 1000 && provider === "Stripe") amountScore += 20;
 
     const userSuccessWithProvider = txs.filter(
       (tx) => tx.success === true
@@ -314,8 +311,8 @@ router.post("/pay", auth, async (req, res) => {
     const providerOrder = routingExplanation.providerOrder;
     const providers = providerOrder.map((provider) => provider.toLowerCase());
 
-    console.log("🧠 Phase 36.4 provider order:", providerOrder);
-    console.log("🧠 Phase 36.4 routing explanation:", routingExplanation);
+    console.log("🧠 Phase 36.5 provider order:", providerOrder);
+    console.log("🧠 Phase 36.5 routing explanation:", routingExplanation);
 
     let lastError = null;
     let result = null;
@@ -394,18 +391,15 @@ router.post("/pay", auth, async (req, res) => {
         (item) => item.provider === providerUsed
       ) || null;
 
-      const profitData = calculateProfit({
-  amount,
-  providerFee: selectedProviderFee?.estimatedFee || 0,
-});
+    const profitData = calculateProfit({
+      amount,
+      providerFee: selectedProviderFee?.estimatedFee || 0,
+    });
 
     await Transaction.create({
       user: req.user._id,
       amount,
       currency,
-      platformFee: profitData.platformFee,
-      estimatedProfit: profitData.estimatedProfit,
-      profitMargin: profitData.profitMargin,
       provider: providerUsed,
       transactionId: result.id || null,
       status: result.status || "completed",
@@ -413,12 +407,18 @@ router.post("/pay", auth, async (req, res) => {
       attempts,
       errorMessage: result.error || null,
       success: true,
+
       recommendedProvider: routingExplanation.recommendedProvider,
       attemptOrder: providerOrder,
       selectionMode: "auto",
+
       estimatedFee: selectedProviderFee?.estimatedFee || 0,
       estimatedNet: selectedProviderFee?.estimatedNet || amount,
       costScore: selectedProviderFee?.costScore || "0.0",
+
+      platformFee: profitData.platformFee,
+      estimatedProfit: profitData.estimatedProfit,
+      profitMargin: profitData.profitMargin,
     });
 
     await updateUserProfile(req.user._id, amount, currency);
@@ -442,14 +442,17 @@ router.post("/pay", auth, async (req, res) => {
       transactionId: result.id || null,
       amount,
       currency,
-      profit: profitData,
       balance: updatedUser.balance,
       fraud: fraudResult,
       attempts,
       rankingUsed: providers,
+
       estimatedFee: selectedProviderFee?.estimatedFee || 0,
       estimatedNet: selectedProviderFee?.estimatedNet || amount,
       costScore: selectedProviderFee?.costScore || "0.0",
+
+      profit: profitData,
+
       routing: {
         recommendedProvider: routingExplanation.recommendedProvider,
         selectedProvider: providerUsed,
@@ -507,6 +510,8 @@ router.get("/intelligence", async (req, res) => {
           totalVolume: { $sum: "$amount" },
           totalEstimatedFees: { $sum: "$estimatedFee" },
           totalEstimatedNet: { $sum: "$estimatedNet" },
+          totalPlatformFees: { $sum: "$platformFee" },
+          totalEstimatedProfit: { $sum: "$estimatedProfit" },
         },
       },
       {
@@ -517,6 +522,8 @@ router.get("/intelligence", async (req, res) => {
           totalVolume: 1,
           totalEstimatedFees: 1,
           totalEstimatedNet: 1,
+          totalPlatformFees: 1,
+          totalEstimatedProfit: 1,
           successRate: {
             $cond: [
               { $gt: ["$totalPayments", 0] },
