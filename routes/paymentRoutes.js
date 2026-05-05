@@ -24,7 +24,7 @@ const round = (num) => Math.round(num * 100) / 100;
 const MAX_PAYMENT_LIMIT = 10000;
 
 // ==================================================
-// PHASE 36.5 — COST + PROFIT-AWARE ROUTING
+// PHASE 36.6 — PROFIT-AWARE ROUTING
 // ==================================================
 async function getDynamicProviderOrder(
   userId,
@@ -46,22 +46,17 @@ async function getDynamicProviderOrder(
     );
 
     const feeEstimate = estimateProviderFee(provider, amount, currency);
-const costScore = Math.max(0, 50 - feeEstimate.fee);
+    const costScore = Math.max(0, 50 - feeEstimate.fee);
 
-// ✅ FIRST define profit
-const platformFeeRate = 0.01;
-const platformFee = amount * platformFeeRate;
+    const platformFeeRate = 0.01;
+    const platformFee = amount * platformFeeRate;
+    const estimatedProfit = platformFee - feeEstimate.fee;
 
-const estimatedProfit = platformFee - feeEstimate.fee;
+    const PROFIT_WEIGHT = 2;
+    let profitScore = estimatedProfit * PROFIT_WEIGHT;
 
-// 🔥 STRONG profit weighting
-const PROFIT_WEIGHT = 2; // you can tune this later
-
-let profitScore = estimatedProfit * PROFIT_WEIGHT;
-
-// clamp to avoid extremes
-if (profitScore > 100) profitScore = 100;
-if (profitScore < -100) profitScore = -100;
+    if (profitScore > 100) profitScore = 100;
+    if (profitScore < -100) profitScore = -100;
 
     if (txs.length === 0) {
       const reliabilityScore = 40;
@@ -75,19 +70,18 @@ if (profitScore < -100) profitScore = -100;
       if (userRiskLevel === "high" && provider === "PayPal") riskScore += 20;
       if (userRiskLevel === "low" && provider === "Stripe") riskScore += 10;
 
-      amountScore += 15;
+      if (amount >= 1000 && provider === "PayPal") amountScore += 15;
       if (amount < 1000 && provider === "Stripe") amountScore += 20;
 
-      let score =
-  reliabilityScore +
-  speedScore +
-  confidenceScore +
-  riskScore +
-  amountScore +
-  historyScore +
-  costScore +
-  profitScore;
-
+      const score =
+        reliabilityScore +
+        speedScore +
+        confidenceScore +
+        riskScore +
+        amountScore +
+        historyScore +
+        costScore +
+        profitScore;
 
       return {
         provider,
@@ -99,8 +93,10 @@ if (profitScore < -100) profitScore = -100;
         estimatedFee: feeEstimate.fee,
         estimatedNet: feeEstimate.netAmount,
         costScore: costScore.toFixed(1),
+        estimatedProfit: Number(estimatedProfit.toFixed(2)),
+        profitScore: profitScore.toFixed(1),
         reason: [
-          "No user-specific data. Using cold-start cost-aware routing.",
+          "No user-specific data. Using cold-start profit-aware routing.",
           `Reliability: ${reliabilityScore.toFixed(1)}`,
           `Speed Score: ${speedScore.toFixed(1)}`,
           `Confidence: ${confidenceScore.toFixed(1)}`,
@@ -108,10 +104,10 @@ if (profitScore < -100) profitScore = -100;
           `Amount Score: ${amountScore}`,
           `History Score: ${historyScore}`,
           `Estimated Fee: $${feeEstimate.fee}`,
-          `Profit: ${estimatedProfit.toFixed(2)}`,
-`Profit Score: ${profitScore.toFixed(1)}`,
           `Estimated Net: $${feeEstimate.netAmount}`,
           `Cost Score: ${costScore.toFixed(1)}`,
+          `Profit: ${estimatedProfit.toFixed(2)}`,
+          `Profit Score: ${profitScore.toFixed(1)}`,
         ].join(" | "),
       };
     }
@@ -147,7 +143,7 @@ if (profitScore < -100) profitScore = -100;
     if (userRiskLevel === "low" && provider === "Stripe") riskScore += 10;
 
     let amountScore = 0;
-    if (amount >= 1000 && provider === "PayPal") amountScore += 40;
+    if (amount >= 1000 && provider === "PayPal") amountScore += 15;
     if (amount < 1000 && provider === "Stripe") amountScore += 20;
 
     const userSuccessWithProvider = txs.filter(
@@ -159,18 +155,15 @@ if (profitScore < -100) profitScore = -100;
       historyScore += 5;
     }
 
-    let score =
+    const score =
       reliabilityScore +
       speedScore +
       confidenceScore +
       riskScore +
       amountScore +
       historyScore +
-      costScore;
-
-    if (amount >= 1000 && provider === "PayPal") {
-      score += 100;
-    }
+      costScore +
+      profitScore;
 
     return {
       provider,
@@ -182,6 +175,8 @@ if (profitScore < -100) profitScore = -100;
       estimatedFee: feeEstimate.fee,
       estimatedNet: feeEstimate.netAmount,
       costScore: costScore.toFixed(1),
+      estimatedProfit: Number(estimatedProfit.toFixed(2)),
+      profitScore: profitScore.toFixed(1),
       reason: [
         `Reliability: ${reliabilityScore.toFixed(1)}`,
         `Speed Score: ${speedScore.toFixed(1)}`,
@@ -192,6 +187,8 @@ if (profitScore < -100) profitScore = -100;
         `Estimated Fee: $${feeEstimate.fee}`,
         `Estimated Net: $${feeEstimate.netAmount}`,
         `Cost Score: ${costScore.toFixed(1)}`,
+        `Profit: ${estimatedProfit.toFixed(2)}`,
+        `Profit Score: ${profitScore.toFixed(1)}`,
         `Recent success rate: ${(successRate * 100).toFixed(1)}%`,
         `Recent avg latency: ${avgLatency.toFixed(0)} ms`,
       ].join(" | "),
@@ -205,7 +202,7 @@ if (profitScore < -100) profitScore = -100;
     rankedProviders: ranked,
     recommendedProvider: ranked[0]?.provider || "Stripe",
     reasonSummary:
-      "Cost-aware multi-objective routing applied: reliability + speed + confidence + risk + amount + fees.",
+      "Profit-aware multi-objective routing applied: reliability + speed + confidence + risk + amount + fees + profit.",
   };
 }
 
@@ -326,8 +323,8 @@ router.post("/pay", auth, async (req, res) => {
     const providerOrder = routingExplanation.providerOrder;
     const providers = providerOrder.map((provider) => provider.toLowerCase());
 
-    console.log("🧠 Phase 36.5 provider order:", providerOrder);
-    console.log("🧠 Phase 36.5 routing explanation:", routingExplanation);
+    console.log("🧠 Phase 36.6 provider order:", providerOrder);
+    console.log("🧠 Phase 36.6 routing explanation:", routingExplanation);
 
     let lastError = null;
     let result = null;
@@ -430,6 +427,8 @@ router.post("/pay", auth, async (req, res) => {
       estimatedFee: selectedProviderFee?.estimatedFee || 0,
       estimatedNet: selectedProviderFee?.estimatedNet || amount,
       costScore: selectedProviderFee?.costScore || "0.0",
+      estimatedProviderProfit: selectedProviderFee?.estimatedProfit || 0,
+      providerProfitScore: selectedProviderFee?.profitScore || "0.0",
 
       platformFee: profitData.platformFee,
       estimatedProfit: profitData.estimatedProfit,
@@ -465,6 +464,8 @@ router.post("/pay", auth, async (req, res) => {
       estimatedFee: selectedProviderFee?.estimatedFee || 0,
       estimatedNet: selectedProviderFee?.estimatedNet || amount,
       costScore: selectedProviderFee?.costScore || "0.0",
+      estimatedProviderProfit: selectedProviderFee?.estimatedProfit || 0,
+      providerProfitScore: selectedProviderFee?.profitScore || "0.0",
 
       profit: profitData,
 
