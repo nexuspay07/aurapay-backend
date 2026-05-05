@@ -6,6 +6,7 @@ const cors = require("cors");
 
 const app = express();
 
+app.use("/stripe", stripeWebhookRoutes);
 // 🔥 MIDDLEWARE
 app.use(express.json());
 
@@ -48,6 +49,7 @@ const onboardingRoutes = require("./routes/onboardingRoutes");
 const stripeRoutes = require("./routes/stripeRoutes");
 const checkoutRoutes = require("./routes/checkoutRoutes");
 const providerAnalyticsRoutes = require("./routes/providerAnalyticsRoutes");
+const stripeWebhookRoutes = require("./routes/stripeWebhookRoutes");
 const paypalCheckoutRoutes = require("./routes/paypalCheckoutRoutes");
 
 // ✅ MOUNT ROUTES
