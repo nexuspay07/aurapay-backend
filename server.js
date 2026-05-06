@@ -1,13 +1,15 @@
 require("dotenv").config();
 
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
+const stripeWebhookRoutes = require("./routes/stripeWebhookRoutes");
 
 const app = express();
 
+// Stripe webhook MUST come before express.json()
 app.use("/stripe", stripeWebhookRoutes);
-// 🔥 MIDDLEWARE
+
+app.use(cors());
 app.use(express.json());
 
 const allowedOrigins = [
@@ -49,7 +51,6 @@ const onboardingRoutes = require("./routes/onboardingRoutes");
 const stripeRoutes = require("./routes/stripeRoutes");
 const checkoutRoutes = require("./routes/checkoutRoutes");
 const providerAnalyticsRoutes = require("./routes/providerAnalyticsRoutes");
-const stripeWebhookRoutes = require("./routes/stripeWebhookRoutes");
 const paypalCheckoutRoutes = require("./routes/paypalCheckoutRoutes");
 
 // ✅ MOUNT ROUTES
