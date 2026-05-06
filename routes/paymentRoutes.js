@@ -396,6 +396,12 @@ router.post("/pay", auth, async (req, res) => {
       });
     }
 
+    function normalizeStatus(providerStatus) {
+  if (providerStatus === "succeeded") return "completed";
+  if (providerStatus === "failed") return "failed";
+  return "pending";
+}
+
     const updatedUser = await User.findById(req.user._id);
 
     const selectedProviderFee =
@@ -413,8 +419,9 @@ router.post("/pay", auth, async (req, res) => {
       amount,
       currency,
       provider: providerUsed,
+      status: normalizeStatus(result.status),
       transactionId: result.id || null,
-      status: result.status || "completed",
+      status: "completed",
       latency: result.latency || 0,
       attempts,
       errorMessage: result.error || null,
