@@ -10,6 +10,9 @@ const LedgerEntry = require("../models/LedgerEntry");
 
 const auth = require("../middlewares/auth");
 
+const {
+  validateDoubleEntry,
+} = require("../services/accountingValidationService");
 const { createLedgerEntry } = require("../services/ledgerService");
 const { payWithStripe } = require("../services/stripeService");
 const { payWithPayPal } = require("../services/paypalService");
@@ -461,6 +464,16 @@ router.post("/pay", auth, async (req, res) => {
       },
     });
 
+    const accountingValidation = await validateDoubleEntry(
+  transaction._id
+);
+
+console.log("📚 Double-entry validation:", accountingValidation);
+
+if (!accountingValidation.balanced) {
+  console.log("🚨 ACCOUNTING IMBALANCE DETECTED");
+}
+
     await updateUserProfile(req.user._id, amount, currency);
 
     await processTransactionFeedback({
@@ -476,6 +489,7 @@ router.post("/pay", auth, async (req, res) => {
 
     return res.json({
       success: true,
+      accounting: accountingValidation,
       status: "completed",
       provider: providerUsed,
       latency: result.latency || 0,
