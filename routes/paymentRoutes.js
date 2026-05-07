@@ -6,9 +6,11 @@ const router = express.Router();
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
 const FraudLog = require("../models/FraudLog");
+const LedgerEntry = require("../models/LedgerEntry");
 
 const auth = require("../middlewares/auth");
 
+const { createLedgerEntry } = require("../services/ledgerService");
 const { payWithStripe } = require("../services/stripeService");
 const { payWithPayPal } = require("../services/paypalService");
 const { convert } = require("../services/fxservice");
@@ -23,18 +25,14 @@ const { applyDefense } = require("../services/defenseService");
 const round = (num) => Math.round(num * 100) / 100;
 const MAX_PAYMENT_LIMIT = 10000;
 
-// ==================================================
-// PHASE 36.6 — PROFIT-AWARE ROUTING
-// ==================================================
-async function getDynamicProviderOrder(
-  userId,
-  amount,
-  currency = "usd",
-  userProfile = {}
-) {
-  const recentTx = await Transaction.find({ user: userId })
-    .sort({ createdAt: -1 })
-    .limit(50);
+function normalizeStatus(providerStatus) {
+  if (providerStatus === "succeeded") return "completed";
+  if (providerStatus === "failed") return "failed";
+  return "completed";
+}
+
+async function getDynamicProviderOrder(userId, amount, currency = "usd", userProfile = {}) {
+  const recentTx = await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(50);
 
   const providers = ["Stripe", "PayPal"];
   const now = Date.now();
@@ -69,7 +67,6 @@ async function getDynamicProviderOrder(
 
       if (userRiskLevel === "high" && provider === "PayPal") riskScore += 20;
       if (userRiskLevel === "low" && provider === "Stripe") riskScore += 10;
-
       if (amount >= 1000 && provider === "PayPal") amountScore += 15;
       if (amount < 1000 && provider === "Stripe") amountScore += 20;
 
@@ -122,11 +119,7 @@ async function getDynamicProviderOrder(
       const weight = Math.exp(-ageMinutes / 60);
 
       totalWeight += weight;
-
-      if (tx.success === true) {
-        weightedSuccess += weight;
-      }
-
+      if (tx.success === true) weightedSuccess += weight;
       weightedLatency += weight * Number(tx.latency || 0);
     });
 
@@ -146,14 +139,10 @@ async function getDynamicProviderOrder(
     if (amount >= 1000 && provider === "PayPal") amountScore += 15;
     if (amount < 1000 && provider === "Stripe") amountScore += 20;
 
-    const userSuccessWithProvider = txs.filter(
-      (tx) => tx.success === true
-    ).length;
+    const userSuccessWithProvider = txs.filter((tx) => tx.success === true).length;
 
     let historyScore = 0;
-    if (userSuccessWithProvider >= 3) {
-      historyScore += 5;
-    }
+    if (userSuccessWithProvider >= 3) historyScore += 5;
 
     const score =
       reliabilityScore +
@@ -225,11 +214,9 @@ router.post("/pay", auth, async (req, res) => {
 
   console.log("🔥 NEW PAYMENT REQUEST:", req.body);
 
-  const data = req.body;
-
   try {
-    const amount = Number(data.amount);
-    const currency = String(data.currency || "").toLowerCase();
+    const amount = Number(req.body.amount);
+    const currency = String(req.body.currency || "").toLowerCase();
 
     if (!amount || Number.isNaN(amount) || amount <= 0) {
       return res.status(400).json({ error: "Invalid amount" });
@@ -255,7 +242,7 @@ router.post("/pay", auth, async (req, res) => {
     const currentEur = Number(req.user.balance.eur || 0);
 
     const fraudResult = await detectFraud(req.user, {
-      ...data,
+      ...req.body,
       amount,
       currency,
       req,
@@ -323,8 +310,7 @@ router.post("/pay", auth, async (req, res) => {
     const providerOrder = routingExplanation.providerOrder;
     const providers = providerOrder.map((provider) => provider.toLowerCase());
 
-    console.log("🧠 Phase 36.6 provider order:", providerOrder);
-    console.log("🧠 Phase 36.6 routing explanation:", routingExplanation);
+    console.log("🧠 Provider order:", providerOrder);
 
     let lastError = null;
     let result = null;
@@ -342,10 +328,7 @@ router.post("/pay", auth, async (req, res) => {
         } else if (provider === "paypal") {
           result = await payWithPayPal({ amount, currency });
         } else {
-          result = {
-            success: false,
-            error: `Unsupported provider: ${provider}`,
-          };
+          result = { success: false, error: `Unsupported provider: ${provider}` };
         }
 
         console.log(`📊 Result from ${provider}:`, result);
@@ -390,42 +373,40 @@ router.post("/pay", auth, async (req, res) => {
       });
     }
 
-    if (!usedConverted) {
-      await User.findByIdAndUpdate(req.user._id, {
-        $inc: { [`balance.${currency}`]: -amount },
-      });
-    }
-
-    function normalizeStatus(providerStatus) {
-  if (providerStatus === "succeeded") return "completed";
-  if (providerStatus === "failed") return "failed";
-  return "pending";
-}
-
-    const updatedUser = await User.findById(req.user._id);
-
     const selectedProviderFee =
-      routingExplanation.rankedProviders.find(
-        (item) => item.provider === providerUsed
-      ) || null;
+      routingExplanation.rankedProviders.find((item) => item.provider === providerUsed) ||
+      null;
 
     const profitData = calculateProfit({
       amount,
       providerFee: selectedProviderFee?.estimatedFee || 0,
     });
 
-    await Transaction.create({
+    const balanceBeforeUser = await User.findById(req.user._id);
+    const balanceBefore = Number(balanceBeforeUser.balance?.[currency] || 0);
+
+    if (!usedConverted) {
+      await User.findByIdAndUpdate(req.user._id, {
+        $inc: { [`balance.${currency}`]: -amount },
+      });
+    }
+
+    const updatedUser = await User.findById(req.user._id);
+    const balanceAfter = Number(updatedUser.balance?.[currency] || 0);
+
+    const transaction = await Transaction.create({
       user: req.user._id,
       amount,
       currency,
       provider: providerUsed,
-      status: normalizeStatus(result.status),
       transactionId: result.id || null,
-      status: "completed",
+      providerPaymentId: result.id || null,
+      status: normalizeStatus(result.status),
       latency: result.latency || 0,
       attempts,
       errorMessage: result.error || null,
       success: true,
+      paymentType: providerUsed === "Stripe" ? "stripe" : "paypal",
 
       recommendedProvider: routingExplanation.recommendedProvider,
       attemptOrder: providerOrder,
@@ -440,6 +421,44 @@ router.post("/pay", auth, async (req, res) => {
       platformFee: profitData.platformFee,
       estimatedProfit: profitData.estimatedProfit,
       profitMargin: profitData.profitMargin,
+
+      rawProviderResponse: result,
+      confirmedAt: new Date(),
+    });
+
+    await createLedgerEntry({
+      user: req.user._id,
+      transaction: transaction._id,
+      type: "debit",
+      account: "wallet",
+      amount,
+      currency,
+      provider: providerUsed,
+      balanceBefore,
+      balanceAfter,
+      description: `Transfer via ${providerUsed}`,
+      metadata: {
+        transactionId: transaction._id,
+        providerPaymentId: result.id || null,
+        routing: routingExplanation,
+      },
+    });
+
+    await createLedgerEntry({
+      user: req.user._id,
+      transaction: transaction._id,
+      type: "credit",
+      account: "provider_settlement",
+      amount,
+      currency,
+      provider: providerUsed,
+      balanceBefore: 0,
+      balanceAfter: amount,
+      description: `Provider settlement via ${providerUsed}`,
+      metadata: {
+        transactionId: transaction._id,
+        providerPaymentId: result.id || null,
+      },
     });
 
     await updateUserProfile(req.user._id, amount, currency);
@@ -498,6 +517,21 @@ router.get("/transactions", auth, async (req, res) => {
   });
 
   res.json(data);
+});
+
+router.get("/ledger", auth, async (req, res) => {
+  try {
+    const entries = await LedgerEntry.find({
+      user: req.user._id,
+    }).sort({
+      createdAt: -1,
+    });
+
+    res.json(entries);
+  } catch (err) {
+    console.log("❌ Ledger fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get("/intelligence", async (req, res) => {
