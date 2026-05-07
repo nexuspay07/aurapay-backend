@@ -635,4 +635,104 @@ router.get("/fraud-logs", auth, async (req, res) => {
   res.json(logs);
 });
 
+router.post("/refund/:transactionId", auth, async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({
+      _id: req.params.transactionId,
+      user: req.user._id,
+    });
+
+    if (!transaction) {
+      return res.status(404).json({
+        error: "Transaction not found",
+      });
+    }
+
+    if (transaction.status === "refunded") {
+      return res.status(400).json({
+        error: "Transaction already refunded",
+      });
+    }
+
+    if (transaction.status !== "completed") {
+      return res.status(400).json({
+        error: "Only completed transactions can be refunded",
+      });
+    }
+
+    const amount = Number(transaction.amount || 0);
+    const currency = String(transaction.currency || "usd").toLowerCase();
+
+    const userBefore = await User.findById(req.user._id);
+    const balanceBefore = Number(userBefore.balance?.[currency] || 0);
+
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: {
+        [`balance.${currency}`]: amount,
+      },
+    });
+
+    const userAfter = await User.findById(req.user._id);
+    const balanceAfter = Number(userAfter.balance?.[currency] || 0);
+
+    const refundDebit = await createLedgerEntry({
+      user: req.user._id,
+      transaction: transaction._id,
+      type: "refund",
+      account: "provider_settlement",
+      amount,
+      currency,
+      provider: transaction.provider,
+      balanceBefore: amount,
+      balanceAfter: 0,
+      description: `Refund reversal from ${transaction.provider}`,
+      metadata: {
+        originalTransaction: transaction._id,
+        providerPaymentId: transaction.providerPaymentId || transaction.transactionId,
+      },
+    });
+
+    const refundCredit = await createLedgerEntry({
+      user: req.user._id,
+      transaction: transaction._id,
+      type: "credit",
+      account: "wallet",
+      amount,
+      currency,
+      provider: transaction.provider,
+      balanceBefore,
+      balanceAfter,
+      description: `Refund credited to wallet`,
+      metadata: {
+        originalTransaction: transaction._id,
+        providerPaymentId: transaction.providerPaymentId || transaction.transactionId,
+        refundDebit: refundDebit._id,
+      },
+    });
+
+    transaction.status = "refunded";
+    transaction.refundedAt = new Date();
+    transaction.success = false;
+    await transaction.save();
+
+    const accountingValidation = await validateDoubleEntry(transaction._id);
+
+    return res.json({
+      success: true,
+      message: "Refund completed",
+      transaction,
+      refundEntries: {
+        refundDebit,
+        refundCredit,
+      },
+      accounting: accountingValidation,
+    });
+  } catch (err) {
+    console.log("❌ Refund error:", err);
+    return res.status(500).json({
+      error: err.message,
+    });
+  }
+});
+
 module.exports = router;
