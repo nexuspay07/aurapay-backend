@@ -789,14 +789,14 @@ router.post("/refund/:transactionId", auth, async (req, res) => {
     transaction.success = false;
 
     transaction.refund = {
-      providerRefundId:
-        providerRefundResult.refundId,
-
-      providerRefundStatus:
-        providerRefundResult.status,
-
-      refundedAt: new Date(),
-    };
+  providerRefundId: providerRefundResult.refundId,
+  providerRefundStatus: providerRefundResult.status,
+  refundAmount: amount,
+  refundCurrency: currency,
+  refundReason: req.body?.reason || "requested_by_user",
+  refundRequestedAt: new Date(),
+  refundCompletedAt: new Date(),
+};
 
     await transaction.save();
 

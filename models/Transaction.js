@@ -144,6 +144,45 @@ const transactionSchema = new mongoose.Schema(
       default: null,
     },
 
+    refund: {
+  providerRefundId: {
+    type: String,
+    default: null,
+    index: true,
+  },
+
+  providerRefundStatus: {
+    type: String,
+    default: null,
+  },
+
+  refundAmount: {
+    type: Number,
+    default: 0,
+  },
+
+  refundCurrency: {
+    type: String,
+    default: null,
+    lowercase: true,
+  },
+
+  refundReason: {
+    type: String,
+    default: "requested_by_user",
+  },
+
+  refundRequestedAt: {
+    type: Date,
+    default: null,
+  },
+
+  refundCompletedAt: {
+    type: Date,
+    default: null,
+  },
+},
+
     refundedAt: {
       type: Date,
       default: null,
