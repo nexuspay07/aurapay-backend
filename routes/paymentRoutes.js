@@ -661,10 +661,46 @@ router.post("/refund/:transactionId", auth, async (req, res) => {
     }
 
     const amount = Number(transaction.amount || 0);
-    const currency = String(transaction.currency || "usd").toLowerCase();
 
+    const currency = String(
+      transaction.currency || "usd"
+    ).toLowerCase();
+
+    // =========================================
+    // REAL PROVIDER REFUND
+    // =========================================
+    const providerRefundResult =
+      await refundProviderPayment({
+        provider: transaction.provider,
+
+        providerPaymentId:
+          transaction.providerPaymentId ||
+          transaction.transactionId,
+
+        amount,
+        currency,
+      });
+
+    console.log(
+      "💸 Provider refund result:",
+      providerRefundResult
+    );
+
+    if (!providerRefundResult?.success) {
+      return res.status(400).json({
+        error: "Provider refund failed",
+        providerRefundResult,
+      });
+    }
+
+    // =========================================
+    // RESTORE USER BALANCE
+    // =========================================
     const userBefore = await User.findById(req.user._id);
-    const balanceBefore = Number(userBefore.balance?.[currency] || 0);
+
+    const balanceBefore = Number(
+      userBefore.balance?.[currency] || 0
+    );
 
     await User.findByIdAndUpdate(req.user._id, {
       $inc: {
@@ -673,62 +709,123 @@ router.post("/refund/:transactionId", auth, async (req, res) => {
     });
 
     const userAfter = await User.findById(req.user._id);
-    const balanceAfter = Number(userAfter.balance?.[currency] || 0);
 
+    const balanceAfter = Number(
+      userAfter.balance?.[currency] || 0
+    );
+
+    // =========================================
+    // LEDGER REVERSAL ENTRIES
+    // =========================================
     const refundDebit = await createLedgerEntry({
       user: req.user._id,
       transaction: transaction._id,
+
       type: "refund",
       account: "provider_settlement",
+
       amount,
       currency,
+
       provider: transaction.provider,
+
       balanceBefore: amount,
       balanceAfter: 0,
+
       description: `Refund reversal from ${transaction.provider}`,
+
       metadata: {
         originalTransaction: transaction._id,
-        providerPaymentId: transaction.providerPaymentId || transaction.transactionId,
+
+        providerPaymentId:
+          transaction.providerPaymentId ||
+          transaction.transactionId,
+
+        providerRefundId:
+          providerRefundResult.refundId,
       },
     });
 
     const refundCredit = await createLedgerEntry({
       user: req.user._id,
       transaction: transaction._id,
+
       type: "credit",
       account: "wallet",
+
       amount,
       currency,
+
       provider: transaction.provider,
+
       balanceBefore,
       balanceAfter,
-      description: `Refund credited to wallet`,
+
+      description: "Refund credited to wallet",
+
       metadata: {
         originalTransaction: transaction._id,
-        providerPaymentId: transaction.providerPaymentId || transaction.transactionId,
+
+        providerPaymentId:
+          transaction.providerPaymentId ||
+          transaction.transactionId,
+
+        providerRefundId:
+          providerRefundResult.refundId,
+
         refundDebit: refundDebit._id,
       },
     });
 
+    // =========================================
+    // UPDATE TRANSACTION
+    // =========================================
     transaction.status = "refunded";
     transaction.refundedAt = new Date();
     transaction.success = false;
+
+    transaction.refund = {
+      providerRefundId:
+        providerRefundResult.refundId,
+
+      providerRefundStatus:
+        providerRefundResult.status,
+
+      refundedAt: new Date(),
+    };
+
     await transaction.save();
 
-    const accountingValidation = await validateDoubleEntry(transaction._id);
+    // =========================================
+    // ACCOUNTING VALIDATION
+    // =========================================
+    const accountingValidation =
+      await validateDoubleEntry(transaction._id);
+
+    console.log(
+      "📚 Refund accounting validation:",
+      accountingValidation
+    );
 
     return res.json({
       success: true,
+
       message: "Refund completed",
+
+      providerRefund: providerRefundResult,
+
       transaction,
+
       refundEntries: {
         refundDebit,
         refundCredit,
       },
+
       accounting: accountingValidation,
     });
   } catch (err) {
     console.log("❌ Refund error:", err);
+
     return res.status(500).json({
       error: err.message,
     });
