@@ -9,12 +9,20 @@ async function validateDoubleEntry(transactionId) {
   let creditTotal = 0;
 
   for (const entry of entries) {
-    if (entry.type === "debit") {
-      debitTotal += Number(entry.amount || 0);
+    const amount = Number(entry.amount || 0);
+
+    // Debit-side movements
+    if (
+      entry.type === "debit" ||
+      entry.type === "refund" ||
+      entry.type === "reversal"
+    ) {
+      debitTotal += amount;
     }
 
+    // Credit-side movements
     if (entry.type === "credit") {
-      creditTotal += Number(entry.amount || 0);
+      creditTotal += amount;
     }
   }
 
