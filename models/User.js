@@ -9,24 +9,50 @@ const userSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
+
     password: {
       type: String,
       required: true,
     },
+
+    role: {
+      type: String,
+      enum: ["user", "admin", "super_admin"],
+      default: "user",
+      index: true,
+    },
+
     balance: {
       usd: { type: Number, default: 0 },
       eur: { type: Number, default: 0 },
     },
 
-    // ✅ Phase 34.1
     status: {
       type: String,
       enum: ["unverified", "pending", "verified"],
       default: "unverified",
+      index: true,
     },
+
     onboardingCompleted: {
       type: Boolean,
       default: false,
+    },
+
+    frozen: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    freezeUntil: {
+      type: Date,
+      default: null,
+    },
+
+    freezeReason: {
+      type: String,
+      default: null,
     },
   },
   { timestamps: true }
