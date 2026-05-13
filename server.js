@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const express = require("express");
 const cors = require("cors");
 const stripeWebhookRoutes = require("./routes/stripeWebhookRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 
@@ -11,6 +12,7 @@ app.use("/stripe", stripeWebhookRoutes);
 
 app.use(cors());
 app.use(express.json());
+app.use("/admin", adminRoutes);
 
 const allowedOrigins = [
   "http://localhost:5173",
