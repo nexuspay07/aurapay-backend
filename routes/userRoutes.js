@@ -6,9 +6,7 @@ const auth = require("../middlewares/auth");
 
 router.get("/me", auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select(
-      "email balance status onboardingCompleted"
-    );
+    const user = await User.findById(req.user._id).select("email balance status role frozen freezeUntil onboardingCompleted");
 
     res.json(user);
   } catch (err) {
