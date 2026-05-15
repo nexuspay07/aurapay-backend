@@ -8,6 +8,8 @@ const User = require("../models/User");
 const Transaction = require("../models/Transaction");
 const LedgerEntry = require("../models/LedgerEntry");
 const FraudLog = require("../models/FraudLog");
+const createAuditLog = require("../utils/createAuditLog");
+const AuditLog = require("../models/AuditLog");
 
 // All admin routes require login + admin role
 router.use(auth);
@@ -77,6 +79,17 @@ router.post("/users/:userId/freeze", async (req, res) => {
     { new: true }
   ).select("-password");
 
+  await createAuditLog({
+  admin: req.user._id,
+  action: "freeze_user",
+  targetUser: user._id,
+  metadata: {
+    reason,
+    hours,
+  },
+  req,
+});
+
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
@@ -99,6 +112,13 @@ router.post("/users/:userId/unfreeze", async (req, res) => {
     { new: true }
   ).select("-password");
 
+  await createAuditLog({
+  admin: req.user._id,
+  action: "unfreeze_user",
+  targetUser: user._id,
+  req,
+});
+
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
@@ -107,6 +127,23 @@ router.post("/users/:userId/unfreeze", async (req, res) => {
     message: "User unfrozen",
     user,
   });
+});
+
+router.get("/audit-logs", auth, admin, async (req, res) => {
+  try {
+    const logs = await AuditLog.find()
+      .populate("admin", "email")
+      .populate("targetUser", "email")
+      .populate("transaction")
+      .sort({ createdAt: -1 })
+      .limit(200);
+
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
 });
 
 module.exports = router;

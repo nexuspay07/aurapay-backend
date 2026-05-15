@@ -28,6 +28,7 @@ const { estimateProviderFee } = require("../services/providerFeeService");
 const { updateUserProfile } = require("../services/riskProfileService");
 const { processTransactionFeedback } = require("../services/feedbackService");
 const { applyDefense } = require("../services/defenseService");
+const createAuditLog = require("../utils/createAuditLog");
 
 const round = (num) => Math.round(num * 100) / 100;
 const MAX_PAYMENT_LIMIT = 10000;
@@ -657,6 +658,21 @@ router.post("/refund/:transactionId", auth, async (req, res) => {
         error: "Transaction already refunded",
       });
     }
+
+    await createAuditLog({
+  admin: req.user._id,
+  action: "refund_transaction",
+  targetUser: transaction.user,
+  transaction: transaction._id,
+
+  metadata: {
+    amount: transaction.amount,
+    currency: transaction.currency,
+    provider: transaction.provider,
+  },
+
+  req,
+});
 
     if (transaction.status !== "completed") {
       return res.status(400).json({
