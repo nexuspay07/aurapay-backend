@@ -4,7 +4,7 @@ const router = express.Router();
 const auth = require("../middlewares/auth");
 
 const permission = require("../middlewares/permission");
-const permissions = require("../middlewares/permissions");
+const permissions = require("../middlewares/permission");
 
 const admin = require("../middlewares/admin");
 const adminAuth = require("../middlewares/adminAuth");

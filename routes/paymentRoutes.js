@@ -21,7 +21,7 @@ const { createLedgerEntry } = require("../services/ledgerService");
 const { payWithStripe } = require("../services/stripeService");
 const { payWithPayPal } = require("../services/paypalService");
 const { convert } = require("../services/fxservice");
-const permissions = require("../middlewares/permissions");
+const permissions = require("../middlewares/permission");
 const { calculateProfit } = require("../services/profitService");
 
 const { detectFraud } = require("../services/fraudService");
