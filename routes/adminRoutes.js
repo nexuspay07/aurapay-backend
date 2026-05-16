@@ -2,7 +2,10 @@ const express = require("express");
 const router = express.Router();
 
 const auth = require("../middlewares/auth");
+
+const permission = require("../middlewares/permission");
 const permissions = require("../middlewares/permissions");
+
 const admin = require("../middlewares/admin");
 const adminAuth = require("../middlewares/adminAuth");
 
@@ -10,14 +13,21 @@ const User = require("../models/User");
 const Transaction = require("../models/Transaction");
 const LedgerEntry = require("../models/LedgerEntry");
 const FraudLog = require("../models/FraudLog");
-const createAuditLog = require("../utils/createAuditLog");
 const AuditLog = require("../models/AuditLog");
 
-// All admin routes require login + admin role
+const createAuditLog = require("../utils/createAuditLog");
+
+// ======================================
+// GLOBAL ADMIN PROTECTION
+// ======================================
+
 router.use(auth);
 router.use(adminAuth);
 
-// Admin health check
+// ======================================
+// ADMIN HEALTH CHECK
+// ======================================
+
 router.get("/test", (req, res) => {
   res.json({
     message: "✅ Admin routes working",
@@ -26,127 +36,213 @@ router.get("/test", (req, res) => {
   });
 });
 
-// Get all users
+// ======================================
+// GET ALL USERS
+// ======================================
+
 router.get("/users", async (req, res) => {
-  const users = await User.find()
-    .select("-password")
-    .sort({ createdAt: -1 });
+  try {
+    const users = await User.find()
+      .select("-password")
+      .sort({ createdAt: -1 });
 
-  res.json(users);
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
 });
 
-// Get all transactions
+// ======================================
+// GET ALL TRANSACTIONS
+// ======================================
+
 router.get("/transactions", async (req, res) => {
-  const transactions = await Transaction.find()
-    .populate("user", "email role status frozen")
-    .sort({ createdAt: -1 });
+  try {
+    const transactions = await Transaction.find()
+      .populate(
+        "user",
+        "email role status frozen"
+      )
+      .sort({ createdAt: -1 });
 
-  res.json(transactions);
+    res.json(transactions);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
 });
 
-// Get all ledger entries
+// ======================================
+// GET LEDGER ENTRIES
+// ======================================
+
 router.get("/ledger", async (req, res) => {
-  const entries = await LedgerEntry.find()
-    .populate("user", "email")
-    .populate("transaction")
-    .sort({ createdAt: -1 });
+  try {
+    const entries = await LedgerEntry.find()
+      .populate("user", "email")
+      .populate("transaction")
+      .sort({ createdAt: -1 });
 
-  res.json(entries);
+    res.json(entries);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
 });
 
-// Get all fraud logs
+// ======================================
+// GET FRAUD LOGS
+// ======================================
+
 router.get("/fraud-logs", async (req, res) => {
-  const logs = await FraudLog.find()
-    .populate("user", "email")
-    .sort({ createdAt: -1 });
+  try {
+    const logs = await FraudLog.find()
+      .populate("user", "email")
+      .sort({ createdAt: -1 });
 
-  res.json(logs);
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
 });
 
-// Freeze user
+// ======================================
+// FREEZE USER
+// ======================================
+
 router.post(
   "/users/:id/freeze",
-  auth,
-  permissions(["risk_admin", "super_admin"]), async (req, res) => {
-  const { reason, hours } = req.body;
+  permissions([
+    "risk_admin",
+    "super_admin",
+  ]),
+  async (req, res) => {
+    try {
+      const { reason, hours } = req.body;
 
-  const freezeUntil = hours
-    ? new Date(Date.now() + Number(hours) * 60 * 60 * 1000)
-    : null;
+      const freezeUntil = hours
+        ? new Date(
+            Date.now() +
+              Number(hours) *
+                60 *
+                60 *
+                1000
+          )
+        : null;
 
-  const user = await User.findByIdAndUpdate(
-    req.params.userId,
-    {
-      frozen: true,
-      freezeUntil,
-      freezeReason: reason || "Admin freeze",
-    },
-    { new: true }
-  ).select("-password");
+      const user =
+        await User.findByIdAndUpdate(
+          req.params.id,
+          {
+            frozen: true,
+            freezeUntil,
+            freezeReason:
+              reason || "Admin freeze",
+          },
+          { new: true }
+        ).select("-password");
 
-  await createAuditLog({
-  admin: req.user._id,
-  action: "freeze_user",
-  targetUser: user._id,
-  metadata: {
-    reason,
-    hours,
-  },
-  req,
-});
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
 
-  if (!user) {
-    return res.status(404).json({ error: "User not found" });
+      await createAuditLog({
+        admin: req.user._id,
+        action: "freeze_user",
+        targetUser: user._id,
+
+        metadata: {
+          reason,
+          hours,
+        },
+
+        req,
+      });
+
+      res.json({
+        message: "User frozen",
+        user,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err.message,
+      });
+    }
   }
+);
 
-  res.json({
-    message: "User frozen",
-    user,
-  });
-});
+// ======================================
+// UNFREEZE USER
+// ======================================
 
-// Unfreeze user
 router.post(
   "/users/:id/unfreeze",
-  auth,
-  permissions(["risk_admin", "super_admin"]), async (req, res) => {
-  const user = await User.findByIdAndUpdate(
-    req.params.userId,
-    {
-      frozen: false,
-      freezeUntil: null,
-      freezeReason: null,
-    },
-    { new: true }
-  ).select("-password");
+  permissions([
+    "risk_admin",
+    "super_admin",
+  ]),
+  async (req, res) => {
+    try {
+      const user =
+        await User.findByIdAndUpdate(
+          req.params.id,
+          {
+            frozen: false,
+            freezeUntil: null,
+            freezeReason: null,
+          },
+          { new: true }
+        ).select("-password");
 
-  await createAuditLog({
-  admin: req.user._id,
-  action: "unfreeze_user",
-  targetUser: user._id,
-  req,
-});
+      if (!user) {
+        return res.status(404).json({
+          error: "User not found",
+        });
+      }
 
-  if (!user) {
-    return res.status(404).json({ error: "User not found" });
+      await createAuditLog({
+        admin: req.user._id,
+        action: "unfreeze_user",
+        targetUser: user._id,
+        req,
+      });
+
+      res.json({
+        message: "User unfrozen",
+        user,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: err.message,
+      });
+    }
   }
+);
 
-  res.json({
-    message: "User unfrozen",
-    user,
-  });
-});
+// ======================================
+// AUDIT LOGS
+// ======================================
 
 router.get(
   "/audit-logs",
-  auth,
-  adminAuth,
   permission("audit:view"),
   async (req, res) => {
     try {
       const logs = await AuditLog.find()
         .populate("admin", "email")
-        .populate("targetUser", "email")
+        .populate(
+          "targetUser",
+          "email"
+        )
+        .populate("transaction")
         .sort({ createdAt: -1 });
 
       res.json(logs);
