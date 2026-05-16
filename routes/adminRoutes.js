@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 
 const auth = require("../middlewares/auth");
+const permissions = require("../middlewares/permissions");
 const admin = require("../middlewares/admin");
 const adminAuth = require("../middlewares/adminAuth");
 
@@ -11,7 +12,6 @@ const LedgerEntry = require("../models/LedgerEntry");
 const FraudLog = require("../models/FraudLog");
 const createAuditLog = require("../utils/createAuditLog");
 const AuditLog = require("../models/AuditLog");
-const permissions = require("../middlewares/permissions");
 
 // All admin routes require login + admin role
 router.use(auth);
