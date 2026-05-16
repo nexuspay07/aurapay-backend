@@ -16,26 +16,43 @@ const userSchema = new mongoose.Schema(
     },
 
     role: {
-  type: String,
-  enum: [
-    "user",
-    "super_admin",
-    "finance_admin",
-    "risk_admin",
-    "support_admin",
-    "auditor",
-  ],
-  default: "user",
-},
+      type: String,
+      enum: [
+        "user",
+        "super_admin",
+        "finance_admin",
+        "risk_admin",
+        "support_admin",
+        "auditor",
+      ],
+      default: "user",
+      index: true,
+    },
+
+    permissions: {
+      type: [String],
+      default: [],
+    },
 
     balance: {
-      usd: { type: Number, default: 0 },
-      eur: { type: Number, default: 0 },
+      usd: {
+        type: Number,
+        default: 0,
+      },
+
+      eur: {
+        type: Number,
+        default: 0,
+      },
     },
 
     status: {
       type: String,
-      enum: ["unverified", "pending", "verified"],
+      enum: [
+        "unverified",
+        "pending",
+        "verified",
+      ],
       default: "unverified",
       index: true,
     },
@@ -61,7 +78,12 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model(
+  "User",
+  userSchema
+);

@@ -1,4 +1,4 @@
-module.exports = function permissions(allowedRoles = []) {
+module.exports = function permission(requiredPermission) {
   return (req, res, next) => {
     try {
       if (!req.user) {
@@ -7,9 +7,14 @@ module.exports = function permissions(allowedRoles = []) {
         });
       }
 
-      if (!allowedRoles.includes(req.user.role)) {
+      const permissions =
+        req.user.permissions || [];
+
+      if (
+        !permissions.includes(requiredPermission)
+      ) {
         return res.status(403).json({
-          error: "Insufficient permissions",
+          error: "Permission denied",
         });
       }
 
