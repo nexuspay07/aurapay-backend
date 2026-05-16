@@ -11,6 +11,7 @@ const LedgerEntry = require("../models/LedgerEntry");
 const FraudLog = require("../models/FraudLog");
 const createAuditLog = require("../utils/createAuditLog");
 const AuditLog = require("../models/AuditLog");
+const permissions = require("../middlewares/permissions");
 
 // All admin routes require login + admin role
 router.use(auth);
@@ -63,7 +64,10 @@ router.get("/fraud-logs", async (req, res) => {
 });
 
 // Freeze user
-router.post("/users/:userId/freeze", async (req, res) => {
+router.post(
+  "/users/:id/freeze",
+  auth,
+  permissions(["risk_admin", "super_admin"]), async (req, res) => {
   const { reason, hours } = req.body;
 
   const freezeUntil = hours
@@ -102,7 +106,10 @@ router.post("/users/:userId/freeze", async (req, res) => {
 });
 
 // Unfreeze user
-router.post("/users/:userId/unfreeze", async (req, res) => {
+router.post(
+  "/users/:id/unfreeze",
+  auth,
+  permissions(["risk_admin", "super_admin"]), async (req, res) => {
   const user = await User.findByIdAndUpdate(
     req.params.userId,
     {
@@ -130,7 +137,10 @@ router.post("/users/:userId/unfreeze", async (req, res) => {
   });
 });
 
-router.get("/audit-logs", auth, admin, async (req, res) => {
+router.get(
+  "/audit-logs",
+  auth,
+  permissions(["auditor", "super_admin"]), auth, admin, async (req, res) => {
   try {
     const logs = await AuditLog.find()
       .populate("admin", "email")

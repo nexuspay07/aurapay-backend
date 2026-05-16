@@ -6,7 +6,15 @@ module.exports = function (req, res, next) {
       });
     }
 
-    if (req.user.role !== "admin") {
+    const adminRoles = [
+      "super_admin",
+      "finance_admin",
+      "risk_admin",
+      "support_admin",
+      "auditor",
+    ];
+
+    if (!adminRoles.includes(req.user.role)) {
       return res.status(403).json({
         error: "Admin access required",
       });

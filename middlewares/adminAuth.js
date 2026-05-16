@@ -8,7 +8,15 @@ function adminAuth(req, res, next) {
 
     const role = req.user.role || "user";
 
-    if (!["admin", "super_admin"].includes(role)) {
+    const adminRoles = [
+      "super_admin",
+      "finance_admin",
+      "risk_admin",
+      "support_admin",
+      "auditor",
+    ];
+
+    if (!adminRoles.includes(role)) {
       return res.status(403).json({
         error: "Admin access required",
       });

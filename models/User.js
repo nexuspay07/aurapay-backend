@@ -16,11 +16,17 @@ const userSchema = new mongoose.Schema(
     },
 
     role: {
-      type: String,
-      enum: ["user", "admin", "super_admin"],
-      default: "user",
-      index: true,
-    },
+  type: String,
+  enum: [
+    "user",
+    "super_admin",
+    "finance_admin",
+    "risk_admin",
+    "support_admin",
+    "auditor",
+  ],
+  default: "user",
+},
 
     balance: {
       usd: { type: Number, default: 0 },

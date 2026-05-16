@@ -21,6 +21,7 @@ const { createLedgerEntry } = require("../services/ledgerService");
 const { payWithStripe } = require("../services/stripeService");
 const { payWithPayPal } = require("../services/paypalService");
 const { convert } = require("../services/fxservice");
+const permissions = require("../middlewares/permissions");
 const { calculateProfit } = require("../services/profitService");
 
 const { detectFraud } = require("../services/fraudService");
@@ -640,7 +641,11 @@ router.get("/fraud-logs", auth, async (req, res) => {
   res.json(logs);
 });
 
-router.post("/refund/:transactionId", auth, async (req, res) => {
+router.post(
+  "/refund/:transactionId",
+  auth,
+  permissions(["finance_admin", "super_admin"]),
+  async (req, res) => {
   try {
     const transaction = await Transaction.findOne({
       _id: req.params.transactionId,
