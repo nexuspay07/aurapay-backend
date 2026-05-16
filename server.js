@@ -5,6 +5,7 @@ const cors = require("cors");
 const stripeWebhookRoutes = require("./routes/stripeWebhookRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
+const adminAuthRoutes = require("./routes/adminAuthRoutes");
 
 const app = express();
 
@@ -13,7 +14,6 @@ app.use("/stripe", stripeWebhookRoutes);
 
 app.use(cors());
 app.use(express.json());
-app.use("/admin", adminRoutes);
 app.use("/analytics", analyticsRoutes);
 
 const allowedOrigins = [
@@ -59,6 +59,8 @@ const paypalCheckoutRoutes = require("./routes/paypalCheckoutRoutes");
 
 // ✅ MOUNT ROUTES
 app.use("/auth", authRoutes);
+app.use("/admin-auth", adminAuthRoutes);
+app.use("/admin", adminRoutes);
 app.use("/user", userRoutes);
 app.use("/wallet", paymentRoutes);
 app.use("/wallet", walletRoutes);
