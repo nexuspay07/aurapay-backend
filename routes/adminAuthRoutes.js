@@ -78,4 +78,27 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// TEMP CREATE ADMIN
+router.get("/seed-admin", async (req, res) => {
+  try {
+    const hashed = await bcrypt.hash(
+      "admin123",
+      10
+    );
+
+    const user = await User.create({
+      email: "admin@example.com",
+      password: hashed,
+      role: "super_admin",
+      status: "verified",
+    });
+
+    res.json(user);
+  } catch (err) {
+    res.json({
+      error: err.message,
+    });
+  }
+});
+
 module.exports = router;

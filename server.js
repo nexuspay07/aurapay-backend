@@ -63,6 +63,7 @@ app.use("/admin-auth", adminAuthRoutes);
 app.use("/admin", adminRoutes);
 app.use("/user", userRoutes);
 app.use("/wallet", paymentRoutes);
+app.use("/api/admin-auth", adminAuthRoutes);
 app.use("/wallet", walletRoutes);
 app.use("/payments", paymentRoutes);
 app.use("/onboarding", onboardingRoutes);
