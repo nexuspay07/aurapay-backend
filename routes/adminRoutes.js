@@ -140,21 +140,22 @@ router.post(
 router.get(
   "/audit-logs",
   auth,
-  permissions(["auditor", "super_admin"]), auth, admin, async (req, res) => {
-  try {
-    const logs = await AuditLog.find()
-      .populate("admin", "email")
-      .populate("targetUser", "email")
-      .populate("transaction")
-      .sort({ createdAt: -1 })
-      .limit(200);
+  adminAuth,
+  permission("audit:view"),
+  async (req, res) => {
+    try {
+      const logs = await AuditLog.find()
+        .populate("admin", "email")
+        .populate("targetUser", "email")
+        .sort({ createdAt: -1 });
 
-    res.json(logs);
-  } catch (err) {
-    res.status(500).json({
-      error: err.message,
-    });
+      res.json(logs);
+    } catch (err) {
+      res.status(500).json({
+        error: err.message,
+      });
+    }
   }
-});
+);
 
 module.exports = router;
