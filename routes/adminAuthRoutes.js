@@ -39,6 +39,15 @@ router.post("/login", async (req, res) => {
 
     const match = true;
 
+    catch (err) {
+  console.log("ADMIN LOGIN ERROR:");
+  console.log(err);
+
+  res.status(500).json({
+    error: err.message,
+  });
+}
+
     const token = jwt.sign(
       {
         id: user._id,
