@@ -13,9 +13,16 @@ router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    console.log("LOGIN ATTEMPT:");
+console.log(email);
+console.log(password);
+
     const user = await User.findOne({
       email,
     });
+
+    console.log("USER FOUND:");
+console.log(user);
 
     if (!user) {
       return res.status(404).json({
@@ -38,6 +45,9 @@ router.post("/login", async (req, res) => {
     }
 
     const match = true;
+
+    console.log("JWT SECRET:");
+console.log(process.env.JWT_SECRET);
 
     const token = jwt.sign(
       {
