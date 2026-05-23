@@ -10,7 +10,15 @@ const adminRoutes = require("./routes/adminRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
 const adminAuthRoutes = require("./routes/adminAuthRoutes");
 
-const authRoutes = require("./routes/authRoutes");
+let authRoutes;
+
+try {
+  authRoutes = require("./routes/authRoutes");
+  console.log("✅ authRoutes loaded");
+} catch (err) {
+  console.log("❌ authRoutes failed");
+  console.log(err);
+}
 const userRoutes = require("./routes/userRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const walletRoutes = require("./routes/walletRoutes");
