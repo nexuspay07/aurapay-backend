@@ -16,6 +16,8 @@ app.use(cors());
 app.use(express.json());
 app.use("/analytics", analyticsRoutes);
 
+const cors = require("cors");
+
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -25,21 +27,18 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
+      // allow requests with no origin
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+        callback(null, true);
+      } else {
+        console.log("Blocked by CORS:", origin);
 
-      if (
-        origin.startsWith("https://aurapay-dashboard-") &&
-        origin.endsWith(".vercel.app")
-      ) {
-        return callback(null, true);
+        callback(null, true);
       }
-
-      return callback(new Error("Not allowed by CORS"));
     },
+
     credentials: true,
   })
 );
