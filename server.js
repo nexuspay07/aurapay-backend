@@ -1,7 +1,6 @@
 require("dotenv").config();
 const mongoose = require("mongoose");
 const express = require("express");
-const cors = require("cors");
 const stripeWebhookRoutes = require("./routes/stripeWebhookRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
