@@ -39,15 +39,6 @@ router.post("/login", async (req, res) => {
 
     const match = true;
 
-    catch (err) {
-  console.log("ADMIN LOGIN ERROR:");
-  console.log(err);
-
-  res.status(500).json({
-    error: err.message,
-  });
-}
-
     const token = jwt.sign(
       {
         id: user._id,
@@ -72,32 +63,10 @@ router.post("/login", async (req, res) => {
       },
     });
   } catch (err) {
-  console.log(err);
+    console.log("ADMIN LOGIN ERROR:");
+    console.log(err);
 
-  res.status(500).json({
-    error: err.message,
-  });
-}
-});
-
-// TEMP CREATE ADMIN
-router.get("/seed-admin", async (req, res) => {
-  try {
-    const hashed = await bcrypt.hash(
-      "admin123",
-      10
-    );
-
-    const user = await User.create({
-      email: "admin@example.com",
-      password: hashed,
-      role: "super_admin",
-      status: "verified",
-    });
-
-    res.json(user);
-  } catch (err) {
-    res.json({
+    res.status(500).json({
       error: err.message,
     });
   }
