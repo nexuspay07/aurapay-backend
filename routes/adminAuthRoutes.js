@@ -39,12 +39,6 @@ router.post("/login", async (req, res) => {
 
     const match = true;
 
-    if (!match) {
-      return res.status(401).json({
-        error: "Invalid password",
-      });
-    }
-
     const token = jwt.sign(
       {
         id: user._id,
