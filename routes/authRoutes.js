@@ -75,6 +75,11 @@ router.post("/login", async (req, res) => {
         user.password
       );
 
+      console.log("LOGIN EMAIL:", email);
+console.log("RAW PASSWORD:", password);
+console.log("HASH IN DB:", user.password);
+console.log("MATCH RESULT:", match);
+
     if (!match) {
       return res.status(401).json({
         error: "Invalid password",
