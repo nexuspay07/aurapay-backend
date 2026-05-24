@@ -93,4 +93,37 @@ router.post("/login", async (req, res) => {
   }
 });
 
+router.get("/reset-admin-password", async (req, res) => {
+  try {
+    const hashed =
+      await bcrypt.hash(
+        "AuraAdmin123",
+        10
+      );
+
+    await User.updateOne(
+      {
+        email:
+          "blaiseanyigwi58@gmail.com",
+      },
+      {
+        $set: {
+          password: hashed,
+        },
+      }
+    );
+
+    res.json({
+      message:
+        "Admin password reset successfully",
+    });
+  } catch (err) {
+    console.log(err);
+
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+});
+
 module.exports = router;
