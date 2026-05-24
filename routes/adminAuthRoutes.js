@@ -13,16 +13,11 @@ router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    console.log("LOGIN ATTEMPT:");
-console.log(email);
-console.log(password);
+    console.log("ADMIN LOGIN:", email);
 
     const user = await User.findOne({
       email,
     });
-
-    console.log("USER FOUND:");
-console.log(user);
 
     if (!user) {
       return res.status(404).json({
@@ -44,17 +39,30 @@ console.log(user);
       });
     }
 
-    const match = true;
+    const match =
+      await bcrypt.compare(
+        password,
+        user.password
+      );
 
-    console.log("JWT SECRET:");
-console.log(process.env.JWT_SECRET);
+    console.log(
+      "PASSWORD MATCH:",
+      match
+    );
+
+    if (!match) {
+      return res.status(401).json({
+        error: "Invalid password",
+      });
+    }
 
     const token = jwt.sign(
       {
         id: user._id,
         email: user.email,
         role: user.role,
-        permissions: user.permissions || [],
+        permissions:
+          user.permissions || [],
       },
       process.env.JWT_SECRET,
       {
@@ -73,7 +81,10 @@ console.log(process.env.JWT_SECRET);
       },
     });
   } catch (err) {
-    console.log("ADMIN LOGIN ERROR:");
+    console.log(
+      "ADMIN LOGIN ERROR:"
+    );
+
     console.log(err);
 
     res.status(500).json({
