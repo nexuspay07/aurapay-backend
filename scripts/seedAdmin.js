@@ -1,44 +1,51 @@
-require("dotenv").config();
-
-const mongoose = require("mongoose");
-const User = require("../models/User");
-
-async function seedAdmin() {
+router.get("/seed-admin", async (req, res) => {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
+    const existing =
+      await User.findOne({
+        email:
+          "blaiseanyigwi58@gmail.com",
+      });
 
-    console.log("✅ MongoDB connected");
-
-    const email = "freshuser999@example.com";
-
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      console.log("❌ User not found");
-      process.exit();
+    if (existing) {
+      return res.json({
+        message:
+          "Admin already exists",
+        admin: existing,
+      });
     }
 
-    user.role = "super_admin";
+    const hashed =
+      await bcrypt.hash(
+        "AuraAdmin123",
+        10
+      );
 
-    user.permissions = [
-      "transaction:view",
-      "transaction:refund",
-      "user:freeze",
-      "fraud:view",
-      "audit:view",
-      "analytics:view",
-    ];
+    const user = await User.create({
+      email:
+        "blaiseanyigwi58@gmail.com",
 
-    await user.save();
+      password: hashed,
 
-    console.log("✅ Admin permissions updated");
-    console.log(user);
+      role: "super_admin",
 
-    process.exit();
+      permissions: [
+        "all_access",
+      ],
+
+      status: "verified",
+    });
+
+    res.json({
+      message:
+        "Admin created successfully",
+
+      admin: user,
+    });
   } catch (err) {
     console.log(err);
-    process.exit(1);
-  }
-}
 
-seedAdmin();
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+});
