@@ -125,5 +125,3 @@ router.get("/reset-admin-password", async (req, res) => {
     });
   }
 });
-
-module.exports = router;
