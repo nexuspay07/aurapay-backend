@@ -15,6 +15,9 @@ const stripeWebhookRoutes = require("./routes/stripeWebhookRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
 const adminAuthRoutes = require("./routes/adminAuthRoutes");
+const auditRoutes = require(
+  "./routes/auditRoutes"
+);
 
 let authRoutes;
 
@@ -80,6 +83,11 @@ app.use(
 app.use(
   "/stripe",
   stripeWebhookRoutes
+);
+
+app.use(
+  "/audit",
+  auditRoutes
 );
 
 // ======================================

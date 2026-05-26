@@ -254,6 +254,114 @@ router.get(
   }
 );
 
+// ======================================
+// LIVE OPERATIONS METRICS
+// ======================================
+
+router.get(
+  "/metrics",
+  async (req, res) => {
+    try {
+      // USERS
+
+      const totalUsers =
+        await User.countDocuments();
+
+      const frozenUsers =
+        await User.countDocuments({
+          frozen: true,
+        });
+
+      // TRANSACTIONS
+
+      const totalTransactions =
+        await Transaction.countDocuments();
+
+      const completedTransactions =
+        await Transaction.countDocuments(
+          {
+            status: "completed",
+          }
+        );
+
+      const refundedTransactions =
+        await Transaction.countDocuments(
+          {
+            refunded: true,
+          }
+        );
+
+      // FRAUD
+
+      const fraudAlerts =
+        await FraudLog.countDocuments();
+
+      // VOLUME
+
+      const volumeAggregation =
+        await Transaction.aggregate([
+          {
+            $match: {
+              status:
+                "completed",
+            },
+          },
+
+          {
+            $group: {
+              _id: null,
+
+              totalVolume: {
+                $sum: "$amount",
+              },
+            },
+          },
+        ]);
+
+      const totalVolume =
+        volumeAggregation[0]
+          ?.totalVolume || 0;
+
+      // SUCCESS RATE
+
+      const successRate =
+        totalTransactions > 0
+          ? (
+              (completedTransactions /
+                totalTransactions) *
+              100
+            ).toFixed(2)
+          : 0;
+
+      // RESPONSE
+
+      res.json({
+        totalUsers,
+
+        frozenUsers,
+
+        totalTransactions,
+
+        completedTransactions,
+
+        refundedTransactions,
+
+        fraudAlerts,
+
+        totalVolume,
+
+        successRate,
+      });
+    } catch (err) {
+      console.log(err);
+
+      res.status(500).json({
+        error: err.message,
+      });
+    }
+  }
+);
+
 
 
 module.exports = router;
