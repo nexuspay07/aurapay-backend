@@ -24,19 +24,27 @@ router.post("/register", async (req, res) => {
       await bcrypt.hash(password, 10);
 
     const user = await User.create({
-      email,
-      password: hashedPassword,
-      balance: {
-        USD: 0,
-        EUR: 0,
-      },
-      status: "verified",
-    });
+  email,
+
+  password: hashedPassword,
+
+  role: role || "user",
+
+  merchantId:
+    merchantId || null,
+
+  status: "verified",
+});
 
     const token = jwt.sign(
-      {
-        id: user._id,
-      },
+  {
+    id: user._id,
+
+    role: user.role,
+
+    merchantId:
+      user.merchantId,
+  },
       process.env.JWT_SECRET,
       {
         expiresIn: "7d",
@@ -57,8 +65,12 @@ router.post("/register", async (req, res) => {
 // LOGIN
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } =
-      req.body;
+    const {
+  email,
+  password,
+  role,
+  merchantId,
+} = req.body;
 
     const user =
       await User.findOne({ email });

@@ -4,7 +4,56 @@ const mongoose = require("mongoose");
 const express = require("express");
 const cors = require("cors");
 
+const http = require("http");
+
+const { Server } = require("socket.io");
+
 const app = express();
+
+const server =
+  http.createServer(app);
+
+  const settlementRoutes =
+  require(
+    "./routes/settlementRoutes"
+  );
+
+  const checkoutRoutes =
+  require(
+    "./routes/checkoutRoutes"
+  );
+
+  // ======================================
+// SOCKET.IO
+// ======================================
+
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+global.io = io;
+
+// CONNECTION
+
+io.on("connection", (socket) => {
+  console.log(
+    "⚡ Admin connected:",
+    socket.id
+  );
+
+  socket.on(
+    "disconnect",
+    () => {
+      console.log(
+        "❌ Admin disconnected:",
+        socket.id
+      );
+    }
+  );
+});
 
 // ======================================
 // IMPORT ROUTES
@@ -34,9 +83,10 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const onboardingRoutes = require("./routes/onboardingRoutes");
 const stripeRoutes = require("./routes/stripeRoutes");
-const checkoutRoutes = require("./routes/checkoutRoutes");
 const providerAnalyticsRoutes = require("./routes/providerAnalyticsRoutes");
 const paypalCheckoutRoutes = require("./routes/paypalCheckoutRoutes");
+const merchantRoutes =
+  require("./routes/merchantRoutes");
 
 // ======================================
 // CORS CONFIG
@@ -83,6 +133,21 @@ app.use(
 app.use(
   "/stripe",
   stripeWebhookRoutes
+);
+
+app.use(
+  "/checkouts",
+  checkoutRoutes
+);
+
+app.use(
+  "/settlements",
+  settlementRoutes
+);
+
+app.use(
+  "/merchants",
+  merchantRoutes
 );
 
 app.use(
@@ -352,7 +417,7 @@ mongoose
 const PORT =
   process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(
     `🚀 Server running on port ${PORT}`
   );

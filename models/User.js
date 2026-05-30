@@ -16,15 +16,19 @@ const userSchema = new mongoose.Schema(
     },
 
     role: {
-      type: String,
-      enum: [
-        "user",
-        "super_admin",
-        "finance_admin",
-        "risk_admin",
-        "support_admin",
-        "auditor",
-      ],
+  type: String,
+  enum: [
+    "user",
+
+    "merchant_owner",
+    "merchant_staff",
+
+    "super_admin",
+    "finance_admin",
+    "risk_admin",
+    "support_admin",
+    "auditor",
+  ],
       default: "user",
       index: true,
     },
@@ -33,6 +37,15 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+
+    merchantId: {
+  type:
+    mongoose.Schema.Types.ObjectId,
+
+  ref: "Merchant",
+
+  default: null,
+},
 
     balance: {
       usd: {
