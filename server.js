@@ -95,30 +95,45 @@ const merchantRoutes =
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
+  "http://localhost:5175",
+
   "https://aurapay-dashboard.vercel.app",
+
   "https://aurapay-dashboard-74hxrc6vk-nexuspay07-5796s-projects.vercel.app",
+
+  "https://aurapay-dashboard-9paiu5vpg-nexuspay07-5796s-projects.vercel.app",
 ];
 
 app.use(
   cors({
-    origin: function (origin, callback) {
+    origin: function (
+      origin,
+      callback
+    ) {
       if (!origin) {
-        return callback(null, true);
+        return callback(
+          null,
+          true
+        );
       }
 
       if (
-        allowedOrigins.includes(origin)
-      ) {
-        callback(null, true);
-      } else {
-        console.log(
-          "Blocked by CORS:",
+        allowedOrigins.includes(
           origin
+        )
+      ) {
+        return callback(
+          null,
+          true
         );
-
-        // TEMPORARY DEBUG
-        callback(null, true);
       }
+
+      console.log(
+        "Blocked by CORS:",
+        origin
+      );
+
+      callback(null, true);
     },
 
     credentials: true,
@@ -127,13 +142,30 @@ app.use(
 
 // ======================================
 // STRIPE WEBHOOK
-// MUST COME BEFORE express.json()
+// MUST STAY BEFORE express.json()
 // ======================================
 
 app.use(
   "/stripe",
   stripeWebhookRoutes
 );
+
+// ======================================
+// BODY PARSERS
+// MUST COME BEFORE ROUTES
+// ======================================
+
+app.use(express.json());
+
+app.use(
+  express.urlencoded({
+    extended: true,
+  })
+);
+
+// ======================================
+// EARLY ROUTES
+// ======================================
 
 app.use(
   "/checkouts",
@@ -156,232 +188,105 @@ app.use(
 );
 
 // ======================================
-// BODY PARSER
+// MAIN ROUTES
 // ======================================
 
-app.use(express.json());
-
-// ======================================
-// ROUTES
-// ======================================
-
-console.log("🔌 Loading routes...");
+console.log(
+  "🔌 Loading routes..."
+);
 
 // AUTH
-try {
-  app.use("/auth", authRoutes);
-  console.log("✅ auth mounted");
-} catch (err) {
-  console.log("❌ auth failed");
-  console.log(err);
-}
+
+app.use(
+  "/auth",
+  authRoutes
+);
 
 // ADMIN AUTH
-try {
-  app.use(
-    "/admin-auth",
-    adminAuthRoutes
-  );
 
-  console.log(
-    "✅ admin-auth mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ admin-auth failed"
-  );
+app.use(
+  "/admin-auth",
+  adminAuthRoutes
+);
 
-  console.log(err);
-}
-
-// API ADMIN AUTH
-try {
-  app.use(
-    "/api/admin-auth",
-    adminAuthRoutes
-  );
-
-  console.log(
-    "✅ api/admin-auth mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ api/admin-auth failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/api/admin-auth",
+  adminAuthRoutes
+);
 
 // ADMIN
-try {
-  app.use("/admin", adminRoutes);
 
-  console.log(
-    "✅ admin mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ admin failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/admin",
+  adminRoutes
+);
 
 // USER
-try {
-  app.use("/user", userRoutes);
 
-  console.log(
-    "✅ user mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ user failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/user",
+  userRoutes
+);
 
 // WALLET
-try {
-  app.use("/wallet", walletRoutes);
 
-  console.log(
-    "✅ wallet mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ wallet failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/wallet",
+  walletRoutes
+);
 
 // PAYMENTS
-try {
-  app.use(
-    "/payments",
-    paymentRoutes
-  );
 
-  console.log(
-    "✅ payments mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ payments failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/payments",
+  paymentRoutes
+);
 
 // ONBOARDING
-try {
-  app.use(
-    "/onboarding",
-    onboardingRoutes
-  );
 
-  console.log(
-    "✅ onboarding mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ onboarding failed"
-  );
+app.use(
+  "/onboarding",
+  onboardingRoutes
+);
 
-  console.log(err);
-}
+// STRIPE API ROUTES
 
-// STRIPE
-try {
-  app.use("/stripe", stripeRoutes);
-
-  console.log(
-    "✅ stripe mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ stripe failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/stripe",
+  stripeRoutes
+);
 
 // CHECKOUT
-try {
-  app.use(
-    "/checkout",
-    checkoutRoutes
-  );
 
-  console.log(
-    "✅ checkout mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ checkout failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/checkout",
+  checkoutRoutes
+);
 
 // PAYPAL
-try {
-  app.use(
-    "/paypal-checkout",
-    paypalCheckoutRoutes
-  );
 
-  console.log(
-    "✅ paypal mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ paypal failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/paypal-checkout",
+  paypalCheckoutRoutes
+);
 
 // PROVIDER ANALYTICS
-try {
-  app.use(
-    "/provider-analytics",
-    providerAnalyticsRoutes
-  );
 
-  console.log(
-    "✅ provider analytics mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ provider analytics failed"
-  );
-
-  console.log(err);
-}
+app.use(
+  "/provider-analytics",
+  providerAnalyticsRoutes
+);
 
 // ANALYTICS
-try {
-  app.use(
-    "/analytics",
-    analyticsRoutes
-  );
 
-  console.log(
-    "✅ analytics mounted"
-  );
-} catch (err) {
-  console.log(
-    "❌ analytics failed"
-  );
+app.use(
+  "/analytics",
+  analyticsRoutes
+);
 
-  console.log(err);
-}
-
-console.log("✅ Routes loaded");
-
+console.log(
+  "✅ Routes loaded"
+);
 // ======================================
 // ROOT ROUTE
 // ======================================
