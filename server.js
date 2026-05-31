@@ -92,16 +92,16 @@ const merchantRoutes =
 // CORS CONFIG
 // ======================================
 
+// ======================================
+// CORS CONFIG
+// ======================================
+
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:5175",
 
   "https://aurapay-dashboard.vercel.app",
-
-  "https://aurapay-dashboard-74hxrc6vk-nexuspay07-5796s-projects.vercel.app",
-
-  "https://aurapay-dashboard-9paiu5vpg-nexuspay07-5796s-projects.vercel.app",
 ];
 
 app.use(
@@ -110,6 +110,7 @@ app.use(
       origin,
       callback
     ) {
+      // Postman / server-to-server
       if (!origin) {
         return callback(
           null,
@@ -117,9 +118,22 @@ app.use(
         );
       }
 
+      // Local development
       if (
         allowedOrigins.includes(
           origin
+        )
+      ) {
+        return callback(
+          null,
+          true
+        );
+      }
+
+      // Allow ALL Vercel deployments
+      if (
+        origin.endsWith(
+          ".vercel.app"
         )
       ) {
         return callback(
@@ -133,7 +147,11 @@ app.use(
         origin
       );
 
-      callback(null, true);
+      return callback(
+        new Error(
+          "Not allowed by CORS"
+        )
+      );
     },
 
     credentials: true,
