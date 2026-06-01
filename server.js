@@ -88,6 +88,11 @@ const paypalCheckoutRoutes = require("./routes/paypalCheckoutRoutes");
 const merchantRoutes =
   require("./routes/merchantRoutes");
 
+  const checkoutOperationsRoutes =
+  require(
+    "./routes/checkoutOperationsRoutes"
+  );
+
 // ======================================
 // CORS CONFIG
 // ======================================
@@ -188,6 +193,11 @@ app.use(
 app.use(
   "/checkouts",
   checkoutRoutes
+);
+
+app.use(
+  "/checkout-ops",
+  checkoutOperationsRoutes
 );
 
 app.use(
