@@ -30,6 +30,16 @@ const checkoutSessionSchema =
         default: "",
       },
 
+      stripePaymentIntentId: {
+  type: String,
+  default: "",
+},
+
+paidAt: {
+  type: Date,
+  default: null,
+},
+
       status: {
         type: String,
         enum: [

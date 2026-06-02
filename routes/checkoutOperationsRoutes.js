@@ -7,9 +7,102 @@ const CheckoutSession =
     "../models/CheckoutSession"
   );
 
+  const stripe =
+  require("stripe")(
+    process.env.STRIPE_SECRET_KEY
+  );
+
+  // ======================================
+// GET SINGLE SESSION
+// ======================================
+
+router.get(
+  "/sessions/by-code/:sessionId",
+  async (req, res) => {
+    try {
+      const session =
+        await CheckoutSession.findOne(
+          {
+            sessionId:
+              req.params
+                .sessionId,
+          }
+        );
+
+      if (!session) {
+        return res.status(404).json({
+          error:
+            "Session not found",
+        });
+      }
+
+      res.json(session);
+    } catch (err) {
+      res.status(500).json({
+        error:
+          err.message,
+      });
+    }
+  }
+);
+
+  // ======================================
+// CREATE PAYMENT INTENT
+// ======================================
+
+router.post(
+  "/sessions/:id/pay",
+  async (req, res) => {
+    try {
+      const session =
+        await CheckoutSession.findById(
+          req.params.id
+        );
+
+      if (!session) {
+        return res.status(404).json({
+          error:
+            "Session not found",
+        });
+      }
+
+      const paymentIntent =
+        await stripe.paymentIntents.create(
+          {
+            amount:
+              Math.round(
+                session.amount *
+                  100
+              ),
+
+            currency:
+              session.currency.toLowerCase(),
+          }
+        );
+
+      session.stripePaymentIntentId =
+        paymentIntent.id;
+
+      await session.save();
+
+      res.json({
+        clientSecret:
+          paymentIntent.client_secret,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error:
+          err.message,
+      });
+    }
+  }
+);
+
   // ======================================
 // CREATE CHECKOUT SESSION
 // ======================================
+
+
 
 router.post(
   "/sessions",
