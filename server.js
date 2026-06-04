@@ -23,6 +23,11 @@ const server =
     "./routes/checkoutRoutes"
   );
 
+  const transactionRoutes =
+  require(
+    "./routes/transactionRoutes"
+  );
+
   // ======================================
 // SOCKET.IO
 // ======================================
@@ -193,6 +198,11 @@ app.use(
 app.use(
   "/checkouts",
   checkoutRoutes
+);
+
+app.use(
+  "/transactions",
+  transactionRoutes
 );
 
 app.use(

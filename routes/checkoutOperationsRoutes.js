@@ -7,6 +7,9 @@ const CheckoutSession =
     "../models/CheckoutSession"
   );
 
+  const Transaction =
+  require("../models/Transaction");
+
   console.log(
   "STRIPE KEY:",
   process.env.STRIPE_KEY
@@ -87,6 +90,29 @@ router.post(
 
       session.stripePaymentIntentId =
         paymentIntent.id;
+
+        await Transaction.create({
+  user: null,
+
+  amount: session.amount,
+
+  currency:
+    session.currency,
+
+  provider: "Stripe",
+
+  transactionId:
+    paymentIntent.id,
+
+  providerPaymentId:
+    paymentIntent.id,
+
+  status: "processing",
+
+  paymentType: "stripe",
+
+  success: false,
+});
 
       await session.save();
 

@@ -3,11 +3,10 @@ const mongoose = require("mongoose");
 const settlementSchema =
   new mongoose.Schema(
     {
-      merchantId: {
+      merchant: {
         type:
           mongoose.Schema.Types.ObjectId,
         ref: "Merchant",
-        required: true,
       },
 
       amount: {
@@ -31,14 +30,14 @@ const settlementSchema =
         default: "pending",
       },
 
-      settlementDate: {
-        type: Date,
-        default: null,
+      transactionCount: {
+        type: Number,
+        default: 0,
       },
 
-      reference: {
-        type: String,
-        default: "",
+      processedAt: {
+        type: Date,
+        default: null,
       },
 
       notes: {
