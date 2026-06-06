@@ -1,10 +1,6 @@
 const express = require("express");
 const router = express.Router();
 
-console.log(
-  "✅ Merchant Analytics Routes Loaded"
-);
-
 const Transaction =
   require("../models/Transaction");
 
@@ -40,21 +36,14 @@ router.get(
           : 0;
 
       res.json({
-        revenueToday:
-          revenue,
-
-        monthlyRevenue:
-          revenue,
-
-        transactions:
-          totalCount,
-
+        revenueToday: revenue,
+        monthlyRevenue: revenue,
+        transactions: totalCount,
         successRate,
       });
     } catch (err) {
       res.status(500).json({
-        error:
-          err.message,
+        error: err.message,
       });
     }
   }
