@@ -1,6 +1,10 @@
 const express = require("express");
 const router = express.Router();
 
+console.log(
+  "✅ Merchant Analytics Routes Loaded"
+);
+
 const Transaction =
   require("../models/Transaction");
 
