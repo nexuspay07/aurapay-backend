@@ -355,6 +355,15 @@ app.get("/", (req, res) => {
   );
 });
 
+app.get(
+  "/merchant-analytics-test",
+  (req, res) => {
+    res.json({
+      success: true,
+    });
+  }
+);
+
 // ======================================
 // DATABASE CONNECTION
 // ======================================
