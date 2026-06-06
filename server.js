@@ -33,6 +33,11 @@ const server =
     "./routes/transactionRoutes"
   );
 
+  const merchantAnalyticsRoutes =
+  require(
+    "./routes/merchantAnalyticsRoutes"
+  );
+
   // ======================================
 // SOCKET.IO
 // ======================================
@@ -203,6 +208,11 @@ app.use(
 app.use(
   "/checkouts",
   checkoutRoutes
+);
+
+app.use(
+  "/merchant-analytics",
+  merchantAnalyticsRoutes
 );
 
 app.use(
