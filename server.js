@@ -18,6 +18,11 @@ const server =
     "./routes/settlementRoutes"
   );
 
+  const adminAnalyticsRoutes =
+  require(
+    "./routes/adminAnalyticsRoutes"
+  );
+
   const paymentCompletionRoutes =
   require(
     "./routes/paymentCompletionRoutes"
@@ -208,6 +213,11 @@ app.use(
 app.use(
   "/checkouts",
   checkoutRoutes
+);
+
+app.use(
+  "/admin-analytics",
+  adminAnalyticsRoutes
 );
 
 app.use(
