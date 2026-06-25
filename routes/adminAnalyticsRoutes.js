@@ -10,11 +10,63 @@ const Merchant =
 const CheckoutSession =
   require("../models/CheckoutSession");
 
+const Settlement =
+  require("../models/Settlement");
+
+const User =
+  require("../models/User");
+
 router.get(
   "/dashboard",
   async (req, res) => {
     try {
-      const totalRevenue =
+      // =====================================
+      // USERS
+      // =====================================
+
+      const totalUsers =
+        await User.countDocuments();
+
+      const frozenUsers =
+        await User.countDocuments({
+          frozen: true,
+        });
+
+      // =====================================
+      // MERCHANTS
+      // =====================================
+
+      const totalMerchants =
+        await Merchant.countDocuments();
+
+      // =====================================
+      // TRANSACTIONS
+      // =====================================
+
+      const totalTransactions =
+        await Transaction.countDocuments();
+
+      const successfulPayments =
+        await Transaction.countDocuments({
+          success: true,
+        });
+
+      const failedPayments =
+        await Transaction.countDocuments({
+          success: false,
+        });
+
+      const completedTransactions =
+        await Transaction.countDocuments({
+          status: "completed",
+        });
+
+      const refundedTransactions =
+        await Transaction.countDocuments({
+          refunded: true,
+        });
+
+      const revenue =
         await Transaction.aggregate([
           {
             $match: {
@@ -31,14 +83,57 @@ router.get(
           },
         ]);
 
-      const totalTransactions =
-        await Transaction.countDocuments();
+      const totalRevenue =
+        revenue[0]?.total || 0;
 
-      const totalMerchants =
-        await Merchant.countDocuments();
+      const successRate =
+        totalTransactions
+          ? (
+              (successfulPayments /
+                totalTransactions) *
+              100
+            ).toFixed(1)
+          : 0;
+
+      // =====================================
+      // CHECKOUTS
+      // =====================================
 
       const totalCheckouts =
         await CheckoutSession.countDocuments();
+
+      const paidCheckouts =
+        await CheckoutSession.countDocuments({
+          status: "paid",
+        });
+
+      const pendingCheckouts =
+        await CheckoutSession.countDocuments({
+          status: "created",
+        });
+
+      const failedCheckouts =
+        await CheckoutSession.countDocuments({
+          status: "failed",
+        });
+
+      // =====================================
+      // SETTLEMENTS
+      // =====================================
+
+      const pendingSettlements =
+        await Settlement.countDocuments({
+          status: "pending",
+        });
+
+      const completedSettlements =
+        await Settlement.countDocuments({
+          status: "completed",
+        });
+
+      // =====================================
+      // RECENT ACTIVITY
+      // =====================================
 
       const recentTransactions =
         await Transaction.find()
@@ -47,25 +142,57 @@ router.get(
           })
           .limit(10);
 
+      const recentCheckouts =
+        await CheckoutSession.find()
+          .sort({
+            createdAt: -1,
+          })
+          .limit(10);
+
+      const recentSettlements =
+        await Settlement.find()
+          .sort({
+            createdAt: -1,
+          })
+          .limit(10);
+
+      // =====================================
+      // RESPONSE
+      // =====================================
+
       res.json({
-        revenue:
-          totalRevenue[0]?.total || 0,
+        totalUsers,
+        frozenUsers,
 
-        transactions:
-          totalTransactions,
+        totalMerchants,
 
-        merchants:
-          totalMerchants,
+        totalRevenue,
 
-        checkouts:
-          totalCheckouts,
+        totalTransactions,
+        successfulPayments,
+        failedPayments,
+        completedTransactions,
+        refundedTransactions,
+
+        successRate,
+
+        totalCheckouts,
+        paidCheckouts,
+        pendingCheckouts,
+        failedCheckouts,
+
+        pendingSettlements,
+        completedSettlements,
 
         recentTransactions,
+        recentCheckouts,
+        recentSettlements,
       });
     } catch (err) {
+      console.error(err);
+
       res.status(500).json({
-        error:
-          err.message,
+        error: err.message,
       });
     }
   }
