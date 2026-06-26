@@ -16,19 +16,19 @@ const userSchema = new mongoose.Schema(
     },
 
     role: {
-  type: String,
-  enum: [
-    "user",
+      type: String,
+      enum: [
+        "user",
 
-    "merchant_owner",
-    "merchant_staff",
+        "merchant_owner",
+        "merchant_staff",
 
-    "super_admin",
-    "finance_admin",
-    "risk_admin",
-    "support_admin",
-    "auditor",
-  ],
+        "super_admin",
+        "finance_admin",
+        "risk_admin",
+        "support_admin",
+        "auditor",
+      ],
       default: "user",
       index: true,
     },
@@ -39,13 +39,10 @@ const userSchema = new mongoose.Schema(
     },
 
     merchantId: {
-  type:
-    mongoose.Schema.Types.ObjectId,
-
-  ref: "Merchant",
-
-  default: null,
-},
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Merchant",
+      default: null,
+    },
 
     balance: {
       usd: {
@@ -73,6 +70,73 @@ const userSchema = new mongoose.Schema(
     onboardingCompleted: {
       type: Boolean,
       default: false,
+    },
+
+    // =====================================
+    // EMAIL VERIFICATION
+    // =====================================
+
+    emailVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    emailVerificationToken: {
+      type: String,
+      default: null,
+    },
+
+    emailVerificationExpires: {
+      type: Date,
+      default: null,
+    },
+
+    // =====================================
+    // PASSWORD RESET
+    // =====================================
+
+    passwordResetToken: {
+      type: String,
+      default: null,
+    },
+
+    passwordResetExpires: {
+      type: Date,
+      default: null,
+    },
+
+    // =====================================
+    // SESSION MANAGEMENT
+    // =====================================
+
+    refreshToken: {
+      type: String,
+      default: null,
+    },
+
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
+
+    lastLoginIP: {
+      type: String,
+      default: null,
+    },
+
+    // =====================================
+    // ACCOUNT SECURITY
+    // =====================================
+
+    loginAttempts: {
+      type: Number,
+      default: 0,
+    },
+
+    lockedUntil: {
+      type: Date,
+      default: null,
     },
 
     frozen: {
