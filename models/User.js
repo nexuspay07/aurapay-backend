@@ -44,6 +44,51 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    emailVerificationToken: {
+  type: String,
+  default: null,
+  index: true,
+},
+
+passwordResetToken: {
+  type: String,
+  default: null,
+  index: true,
+},
+
+refreshToken: {
+  type: String,
+  default: null,
+  index: true,
+},
+
+password: {
+  type: String,
+  required: true,
+  select: false,
+},
+
+emailVerificationToken: {
+  type: String,
+  default: null,
+  index: true,
+  select: false,
+},
+
+passwordResetToken: {
+  type: String,
+  default: null,
+  index: true,
+  select: false,
+},
+
+refreshToken: {
+  type: String,
+  default: null,
+  index: true,
+  select: false,
+},
+
     balance: {
       usd: {
         type: Number,
@@ -115,6 +160,11 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    refreshTokenExpires: {
+  type: Date,
+  default: null,
+},
+
     lastLogin: {
       type: Date,
       default: null,
@@ -159,6 +209,15 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+userSchema.virtual("isLocked").get(function () {
+  return (
+    this.lockedUntil &&
+    this.lockedUntil > Date.now()
+  );
+});
+
+
 
 module.exports = mongoose.model(
   "User",

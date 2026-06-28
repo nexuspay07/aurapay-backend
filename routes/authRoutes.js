@@ -82,6 +82,12 @@ router.post(
           "hex"
         );
 
+        const hashedVerificationToken =
+  crypto
+    .createHash("sha256")
+    .update(verificationToken)
+    .digest("hex");
+
       const verificationExpiry =
         new Date(
           Date.now() +
@@ -113,7 +119,7 @@ router.post(
             false,
 
           emailVerificationToken:
-            verificationToken,
+  hashedVerificationToken,
 
           emailVerificationExpires:
             verificationExpiry,
@@ -184,11 +190,29 @@ router.post(
         );
 
       if (!match) {
-        return res.status(401).json({
-          error:
-            "Invalid password",
-        });
-      }
+
+  user.loginAttempts += 1;
+
+  if (user.loginAttempts >= 5) {
+
+    user.lockedUntil =
+      new Date(
+        Date.now() +
+          15 *
+            60 *
+            1000
+      );
+
+    user.loginAttempts = 0;
+  }
+
+  await user.save();
+
+  return res.status(401).json({
+    error:
+      "Invalid password",
+  });
+}
 
       // ==================================
       // EMAIL NOT VERIFIED
@@ -206,6 +230,10 @@ router.post(
       user.lastLogin =
         new Date();
 
+        user.loginAttempts = 0;
+
+user.lockedUntil = null;
+
       await user.save();
 
       const token =
@@ -218,6 +246,16 @@ const refreshToken =
 
 user.refreshToken =
   refreshToken;
+
+  user.refreshTokenExpires =
+  new Date(
+    Date.now() +
+      30 *
+        24 *
+        60 *
+        60 *
+        1000
+  );
 
 await user.save();
 
@@ -247,13 +285,16 @@ router.get(
   "/verify-email/:token",
   async (req, res) => {
     try {
-      const token =
-        req.params.token;
+      const hashedToken =
+  crypto
+    .createHash("sha256")
+    .update(req.params.token)
+    .digest("hex");
 
       const user =
         await User.findOne({
           emailVerificationToken:
-            token,
+  hashedToken,
         });
 
       if (!user) {
@@ -262,6 +303,16 @@ router.get(
             "Invalid verification link.",
         });
       }
+
+      if (
+  !user.refreshTokenExpires ||
+  user.refreshTokenExpires < new Date()
+) {
+  return res.status(401).json({
+    error:
+      "Refresh token expired.",
+  });
+}
 
       if (
         !user.emailVerificationExpires ||
@@ -327,14 +378,23 @@ router.post(
         });
       }
 
-      if (
-        user.emailVerified
-      ) {
-        return res.json({
-          message:
-            "Email already verified.",
-        });
-      }
+      const adminRoles = [
+  "super_admin",
+  "finance_admin",
+  "risk_admin",
+  "support_admin",
+  "auditor",
+];
+
+if (
+  !user.emailVerified &&
+  !adminRoles.includes(user.role)
+) {
+  return res.status(403).json({
+    error:
+      "Please verify your email before logging in.",
+  });
+}
 
       const verificationToken =
         crypto
@@ -377,6 +437,16 @@ router.post(
   }
 );
 
+if (
+  user.lockedUntil &&
+  user.lockedUntil > new Date()
+) {
+  return res.status(423).json({
+    error:
+      "Account temporarily locked.",
+  });
+}
+
 // ======================================
 // FORGOT PASSWORD
 // ======================================
@@ -411,13 +481,14 @@ router.post(
       // GENERATE RESET TOKEN
       // ======================================
 
-      const resetToken =
-        crypto
-          .randomBytes(32)
-          .toString("hex");
+      const hashedResetToken =
+  crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
 
       user.passwordResetToken =
-        resetToken;
+  hashedResetToken;
 
       user.passwordResetExpires =
         new Date(
@@ -463,8 +534,11 @@ router.post(
   "/reset-password/:token",
   async (req, res) => {
     try {
-      const token =
-        req.params.token;
+      const hashedToken =
+  crypto
+    .createHash("sha256")
+    .update(req.params.token)
+    .digest("hex");
 
       const {
         password,
@@ -480,7 +554,7 @@ router.post(
       const user =
         await User.findOne({
           passwordResetToken:
-            token,
+  hashedToken,
         });
 
       if (!user) {
@@ -500,6 +574,22 @@ router.post(
             "Reset link has expired.",
         });
       }
+
+      if (password.length < 8) {
+  return res.status(400).json({
+    error: "Password must be at least 8 characters long.",
+  });
+}
+
+const passwordRegex =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+
+if (!passwordRegex.test(password)) {
+  return res.status(400).json({
+    error:
+      "Password must contain at least one uppercase letter, one lowercase letter, and one number.",
+  });
+}
 
       // ======================================
       // HASH NEW PASSWORD
