@@ -171,10 +171,9 @@ router.post(
       } = req.body;
 
       const user =
-        await User.findOne({
-          email:
-            email.toLowerCase(),
-        });
+  await User.findOne({
+    email: email.toLowerCase(),
+  }).select("+password");
 
       if (!user) {
         return res.status(404).json({
@@ -182,6 +181,18 @@ router.post(
             "User not found",
         });
       }
+
+      
+
+console.log("========== LOGIN DEBUG ==========");
+console.log("req.body:", req.body);
+console.log("Email:", email);
+console.log("Password:", password);
+console.log("User:", user);
+console.log("user.password:", user?.password);
+console.log("typeof password:", typeof password);
+console.log("typeof user.password:", typeof user?.password);
+console.log("================================");
 
       const match =
         await bcrypt.compare(
