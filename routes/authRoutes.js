@@ -437,15 +437,6 @@ if (
   }
 );
 
-if (
-  user.lockedUntil &&
-  user.lockedUntil > new Date()
-) {
-  return res.status(423).json({
-    error:
-      "Account temporarily locked.",
-  });
-}
 
 // ======================================
 // FORGOT PASSWORD
@@ -476,6 +467,20 @@ router.post(
             "If an account exists, a password reset email has been sent.",
         });
       }
+
+      // ======================================
+// ACCOUNT LOCK CHECK
+// ======================================
+
+if (
+  user.lockedUntil &&
+  user.lockedUntil > new Date()
+) {
+  return res.status(423).json({
+    error:
+      "Account temporarily locked. Please try again later.",
+  });
+}
 
       // ======================================
       // GENERATE RESET TOKEN
