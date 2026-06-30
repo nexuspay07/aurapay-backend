@@ -13,12 +13,33 @@ async function sendEmail({
   subject,
   html,
 }) {
-  return resend.emails.send({
-    from: process.env.EMAIL_FROM,
-    to,
-    subject,
-    html,
-  });
+  console.log("=================================");
+  console.log("📧 EMAIL DEBUG");
+  console.log("FROM:", process.env.EMAIL_FROM);
+  console.log("TO:", to);
+  console.log("SUBJECT:", subject);
+
+  try {
+    const response =
+      await resend.emails.send({
+        from: process.env.EMAIL_FROM,
+        to,
+        subject,
+        html,
+      });
+
+    console.log("✅ RESEND RESPONSE:");
+    console.log(response);
+    console.log("=================================");
+
+    return response;
+  } catch (err) {
+    console.log("❌ RESEND ERROR:");
+    console.log(err);
+    console.log("=================================");
+
+    throw err;
+  }
 }
 
 // ======================================
