@@ -42,6 +42,11 @@ async function sendEmail({
   }
 }
 
+console.log(
+  "API KEY:",
+  process.env.RESEND_API_KEY?.slice(0, 12)
+);
+
 // ======================================
 // EMAIL VERIFICATION
 // ======================================
