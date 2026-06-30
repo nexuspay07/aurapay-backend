@@ -129,10 +129,16 @@ router.post(
       // SEND EMAIL
       // ===========================
 
-      await sendVerificationEmail(
-        user,
-        verificationToken
-      );
+      const emailResult =
+await sendVerificationEmail(
+user,
+verificationToken
+);
+
+console.log(
+"Verification email:",
+emailResult
+);
 
       res.status(201).json({
         message:
@@ -268,6 +274,8 @@ user.refreshToken =
         1000
   );
 
+  
+
 await user.save();
 
 res.json({
@@ -314,16 +322,6 @@ router.get(
             "Invalid verification link.",
         });
       }
-
-      if (
-  !user.refreshTokenExpires ||
-  user.refreshTokenExpires < new Date()
-) {
-  return res.status(401).json({
-    error:
-      "Refresh token expired.",
-  });
-}
 
       if (
         !user.emailVerificationExpires ||
@@ -397,13 +395,9 @@ router.post(
   "auditor",
 ];
 
-if (
-  !user.emailVerified &&
-  !adminRoles.includes(user.role)
-) {
-  return res.status(403).json({
-    error:
-      "Please verify your email before logging in.",
+if (user.emailVerified) {
+  return res.status(400).json({
+    error: "Email is already verified.",
   });
 }
 
@@ -412,8 +406,14 @@ if (
           .randomBytes(32)
           .toString("hex");
 
-      user.emailVerificationToken =
-        verificationToken;
+      const hashedVerificationToken =
+crypto
+.createHash("sha256")
+.update(verificationToken)
+.digest("hex");
+
+user.emailVerificationToken =
+hashedVerificationToken;
 
       user.emailVerificationExpires =
         new Date(
@@ -497,7 +497,13 @@ if (
       // GENERATE RESET TOKEN
       // ======================================
 
-      const hashedResetToken =
+     
+ const resetToken =
+  crypto
+    .randomBytes(32)
+    .toString("hex");
+
+const hashedResetToken =
   crypto
     .createHash("sha256")
     .update(resetToken)

@@ -165,6 +165,11 @@ refreshToken: {
   default: null,
 },
 
+    refreshTokenExpires: {
+  type: Date,
+  default: null,
+},
+
     lastLogin: {
       type: Date,
       default: null,
