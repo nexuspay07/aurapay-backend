@@ -380,6 +380,9 @@ router.post(
             email.toLowerCase(),
         });
 
+        console.log("========== RESEND ==========");
+console.log(user);
+
       if (!user) {
         return res.status(404).json({
           error:
@@ -426,10 +429,18 @@ hashedVerificationToken;
 
       await user.save();
 
-      await sendVerificationEmail(
-        user,
-        verificationToken
-      );
+      console.log(
+  "Saved token:",
+  user.emailVerificationToken
+);
+
+      const result =
+  await sendVerificationEmail(
+    user,
+    verificationToken
+  );
+
+console.log(result);
 
       res.json({
         success: true,

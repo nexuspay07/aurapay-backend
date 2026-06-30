@@ -7,6 +7,12 @@ const Merchant = require("../models/Merchant");
 const bcrypt =
   require("bcryptjs");
 
+  const crypto = require("crypto");
+
+const {
+  sendVerificationEmail,
+} = require("../services/emailService");
+
 const User =
   require("../models/User");
 
@@ -68,27 +74,52 @@ router.post(
           ownerEmail,
         });
 
-      const owner =
-        await User.create({
-          email: ownerEmail,
+      const verificationToken =
+  crypto.randomBytes(32).toString("hex");
 
-          password:
-            hashedPassword,
+const hashedVerificationToken =
+  crypto
+    .createHash("sha256")
+    .update(verificationToken)
+    .digest("hex");
 
-          role:
-            "merchant_owner",
+const owner =
+  await User.create({
+    email: ownerEmail,
 
-          merchantId:
-            merchant._id,
+    password: hashedPassword,
 
-          status:
-            "verified",
-        });
+    role: "merchant_owner",
+
+    merchantId: merchant._id,
+
+    status: "unverified",
+
+    emailVerified: false,
+
+    emailVerificationToken:
+      hashedVerificationToken,
+
+    emailVerificationExpires:
+      new Date(
+        Date.now() +
+        24 * 60 * 60 * 1000
+      ),
+  });
+
+await sendVerificationEmail(
+  owner,
+  verificationToken
+);
 
       res.status(201).json({
-        merchant,
-        owner,
-      });
+  success: true,
+
+  message:
+    "Merchant created. Please check your email to verify your account.",
+
+  merchant,
+});
     } catch (err) {
       console.log(err);
 
