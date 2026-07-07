@@ -8,6 +8,20 @@ const transactionSchema = new mongoose.Schema(
       required: false,
     },
 
+    merchant: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Merchant",
+  required: true,
+  index: true,
+},
+
+checkoutSession: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "CheckoutSession",
+  default: null,
+  index: true,
+},
+
     amount: {
       type: Number,
       required: true,
@@ -18,6 +32,19 @@ const transactionSchema = new mongoose.Schema(
       required: true,
       lowercase: true,
     },
+
+    customerName: {
+  type: String,
+  default: "",
+  trim: true,
+},
+
+customerEmail: {
+  type: String,
+  default: "",
+  lowercase: true,
+  trim: true,
+},
 
     provider: {
       type: String,
@@ -124,6 +151,16 @@ const transactionSchema = new mongoose.Schema(
       default: 0,
     },
 
+    merchantFee: {
+  type: Number,
+  default: 0,
+},
+
+merchantNet: {
+  type: Number,
+  default: 0,
+},
+
     profitMargin: {
       type: Number,
       default: 0,
@@ -138,6 +175,22 @@ const transactionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    settlement: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Settlement",
+  default: null,
+},
+
+settled: {
+  type: Boolean,
+  default: false,
+},
+
+settledAt: {
+  type: Date,
+  default: null,
+},
 
     failedAt: {
       type: Date,
