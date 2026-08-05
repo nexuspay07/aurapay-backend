@@ -42,7 +42,7 @@ router.post("/", auth, async (req, res) => {
       status: "pending",
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to submit onboarding" });
   }
 });
 
@@ -58,7 +58,7 @@ router.get("/", auth, async (req, res) => {
       onboardingCompleted: user?.onboardingCompleted || false,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to load onboarding status" });
   }
 });
 

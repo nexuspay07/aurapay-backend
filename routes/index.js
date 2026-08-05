@@ -7,6 +7,9 @@ module.exports = function registerRoutes(app) {
   const stripeWebhookRoutes =
     require("./stripeWebhookRoutes");
 
+  const publicApiV1Routes =
+    require("./api/v1");
+
   const authRoutes =
     require("./authRoutes");
 
@@ -64,6 +67,15 @@ module.exports = function registerRoutes(app) {
   const adminAnalyticsRoutes =
     require("./adminAnalyticsRoutes");
 
+  const merchantProfileRoutes =
+  require("./merchantProfileRoutes"); 
+  
+  const merchantSettingsRoutes =
+  require("./merchantSettingsRoutes");
+
+  const merchantDeveloperRoutes =
+    require("./merchantDeveloperRoutes");
+
   const auditRoutes =
     require("./auditRoutes");
 
@@ -74,6 +86,11 @@ module.exports = function registerRoutes(app) {
   app.use(
     "/stripe",
     stripeWebhookRoutes
+  );
+
+  app.use(
+    "/api/v1",
+    publicApiV1Routes
   );
 
   // ======================================
@@ -123,6 +140,45 @@ module.exports = function registerRoutes(app) {
     "/api/merchants",
     merchantRoutes
   );
+
+  // ======================================
+// MERCHANT PROFILE
+// ======================================
+
+app.use(
+  "/merchant/profile",
+  merchantProfileRoutes
+);
+
+app.use(
+  "/api/merchant/profile",
+  merchantProfileRoutes
+);
+
+
+// ======================================
+// MERCHANT SETTINGS
+// ======================================
+
+app.use(
+  "/merchant/settings",
+  merchantSettingsRoutes
+);
+
+app.use(
+  "/api/merchant/settings",
+  merchantSettingsRoutes
+);
+
+app.use(
+  "/merchant/developer",
+  merchantDeveloperRoutes
+);
+
+app.use(
+  "/api/merchant/developer",
+  merchantDeveloperRoutes
+);
 
   // ======================================
   // CHECKOUTS

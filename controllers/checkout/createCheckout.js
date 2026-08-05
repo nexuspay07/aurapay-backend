@@ -1,88 +1,113 @@
-const Checkout = require("../../models/Checkout");
+const Checkout =
+  require("../../models/Checkout");
 
 const generateSlug =
   require("../../utils/slugGenerator");
 
-module.exports = async function createCheckout(
-  req,
-  res
-) {
-  try {
-    const {
-      title,
-      description,
-      amount,
-      currency,
-    } = req.body;
+module.exports =
+  async function createCheckout(
+    req,
+    res
+  ) {
+    try {
 
-    // ===============================
-    // VALIDATION
-    // ===============================
+      const {
+        title,
+        description,
+        amount,
+        currency,
+      } = req.body;
 
-    if (!title?.trim()) {
-      return res.status(400).json({
-        error: "Title is required.",
-      });
-    }
+      // ======================================
+      // VALIDATION
+      // ======================================
 
-    if (
-      amount === undefined ||
-      Number(amount) <= 0
-    ) {
-      return res.status(400).json({
-        error:
-          "Amount must be greater than zero.",
-      });
-    }
+      if (!title || !title.trim()) {
 
-    // ===============================
-    // CREATE CHECKOUT
-    // ===============================
+        return res.status(400).json({
+          success: false,
+          error: "Title is required.",
+        });
 
-    const checkout =
-      await Checkout.create({
-        merchantId:
-          req.user.merchantId,
+      }
 
-        createdBy:
-          req.user._id,
+      if (
+        amount === undefined ||
+        Number(amount) <= 0
+      ) {
 
-        title:
-          title.trim(),
+        return res.status(400).json({
+          success: false,
+          error:
+            "Amount must be greater than zero.",
+        });
 
-        description:
-          description || "",
+      }
 
-        amount:
-          Number(amount),
+      // ======================================
+      // CREATE CHECKOUT
+      // ======================================
 
-        currency:
-          currency || "USD",
+      const checkout =
+        await Checkout.create({
 
-        slug:
-          generateSlug(title),
-      });
+          merchantId:
+            req.merchant._id,
 
-    return res.status(201).json({
-      success: true,
+          title:
+            title.trim(),
 
-      message:
-        "Checkout created successfully.",
+          description:
+            description || "",
 
-      checkout,
+          amount:
+            Number(amount),
 
-      paymentUrl:
+          currency:
+            currency || "USD",
+
+          status:
+            "active",
+
+          slug:
+            generateSlug(title),
+
+        });
+
+      // ======================================
+      // RESPONSE
+      // ======================================
+
+      return res.status(201).json({
+
+        success: true,
+
+        message:
+          "Checkout created successfully.",
+
+        checkout,
+
+        paymentUrl:
 `${process.env.FRONTEND_URL}/pay/${checkout.slug}`,
-    });
 
-  } catch (err) {
+      });
 
-    console.error(err);
+    } catch (err) {
 
-    return res.status(500).json({
-      error:
-        "Failed to create checkout.",
-    });
+      console.error(
+        "[CREATE CHECKOUT]",
+        err
+      );
 
-  }
-};
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          "Failed to create checkout.",
+
+      });
+
+    }
+
+  };

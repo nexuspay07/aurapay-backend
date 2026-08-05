@@ -124,6 +124,30 @@ kybReviewedBy: {
   default: "",
 },
 
+// ======================================
+// MERCHANT SETTINGS
+// ======================================
+
+defaultCurrency: {
+  type: String,
+  default: "USD",
+},
+
+emailNotifications: {
+  type: Boolean,
+  default: true,
+},
+
+paymentNotifications: {
+  type: Boolean,
+  default: true,
+},
+
+marketingEmails: {
+  type: Boolean,
+  default: false,
+},
+
       notes: {
         type: String,
         default: "",

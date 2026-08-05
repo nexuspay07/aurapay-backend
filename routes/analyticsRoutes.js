@@ -82,7 +82,7 @@ router.get(
       });
     } catch (err) {
       res.status(500).json({
-        error: err.message,
+        error: "Failed to load analytics overview",
       });
     }
   }

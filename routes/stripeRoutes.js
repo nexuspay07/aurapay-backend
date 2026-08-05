@@ -12,23 +12,14 @@ router.post("/create-payment-intent", auth, async (req, res) => {
   try {
     const { amount, currency } = req.body;
 
-    console.log("🔥 Stripe request body:", req.body);
-    console.log("👤 Auth user:", req.user?._id);
-
     const paymentIntent = await createPaymentIntent(amount, currency);
-
-    console.log("✅ PaymentIntent created:", paymentIntent.id);
 
     res.json({
       clientSecret: paymentIntent.client_secret,
     });
   } catch (err) {
-    console.error("❌ FULL STRIPE ERROR:", err);
-
     res.status(500).json({
-      error: err.message,
-      type: err.type || "StripeError",
-      raw: err.raw || null,
+      error: "Failed to create Stripe payment intent",
     });
   }
 });
@@ -40,9 +31,6 @@ router.post("/save-payment", auth, async (req, res) => {
   try {
     const { amount, currency, paymentIntentId, status } = req.body;
 
-    console.log("🔥 SAVE STRIPE PAYMENT BODY:", req.body);
-    console.log("👤 SAVE STRIPE PAYMENT USER:", req.user?._id);
-
     if (!amount || !currency || !paymentIntentId) {
       return res.status(400).json({
         error: "Missing required payment fields",
@@ -50,12 +38,14 @@ router.post("/save-payment", auth, async (req, res) => {
     }
 
     const transaction = await Transaction.create({
+      merchant: req.user.merchantId,
       user: req.user._id,
       amount: Number(amount),
       currency: String(currency).toLowerCase(),
       provider: "Stripe",
       transactionId: paymentIntentId,
-      status: status || "succeeded",
+      providerPaymentId: paymentIntentId,
+      status: status || "completed",
       latency: 0,
       attempts: 1,
       errorMessage: null,
@@ -63,16 +53,13 @@ router.post("/save-payment", auth, async (req, res) => {
       paymentType: "stripe",
     });
 
-    console.log("✅ STRIPE PAYMENT SAVED:", transaction._id);
-
     res.json({
       message: "Stripe payment saved successfully",
       transaction,
     });
   } catch (err) {
-    console.error("❌ SAVE PAYMENT ERROR:", err);
     res.status(500).json({
-      error: err.message || "Failed to save Stripe payment",
+      error: "Failed to save Stripe payment",
     });
   }
 });

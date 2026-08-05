@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const User = require("../models/User");
 
 module.exports = async function auth(req, res, next) {
@@ -12,6 +13,10 @@ module.exports = async function auth(req, res, next) {
     const token = authHeader.split(" ")[1];
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    if (!mongoose.Types.ObjectId.isValid(decoded.id)) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
 
     const user = await User.findById(decoded.id);
     if (!user) {
@@ -28,7 +33,6 @@ module.exports = async function auth(req, res, next) {
     req.user = user;
     next();
   } catch (err) {
-    console.log("❌ Auth error:", err.message);
     return res.status(401).json({ error: "Invalid token" });
   }
 };

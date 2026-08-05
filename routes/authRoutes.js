@@ -4,6 +4,7 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const mongoose = require("mongoose");
 
 const User = require("../models/User");
 
@@ -129,16 +130,10 @@ router.post(
       // SEND EMAIL
       // ===========================
 
-      const emailResult =
-await sendVerificationEmail(
-user,
-verificationToken
-);
-
-console.log(
-"Verification email:",
-emailResult
-);
+      await sendVerificationEmail(
+        user,
+        verificationToken
+      );
 
       res.status(201).json({
         message:
@@ -153,11 +148,9 @@ emailResult
         },
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
         error:
-          err.message,
+          "Registration failed",
       });
     }
   }
@@ -176,6 +169,13 @@ router.post(
         password,
       } = req.body;
 
+      if (!email || !password) {
+        return res.status(400).json({
+          error:
+            "Email and password are required",
+        });
+      }
+
       const user =
   await User.findOne({
     email: email.toLowerCase(),
@@ -187,18 +187,6 @@ router.post(
             "User not found",
         });
       }
-
-      
-
-console.log("========== LOGIN DEBUG ==========");
-console.log("req.body:", req.body);
-console.log("Email:", email);
-console.log("Password:", password);
-console.log("User:", user);
-console.log("user.password:", user?.password);
-console.log("typeof password:", typeof password);
-console.log("typeof user.password:", typeof user?.password);
-console.log("================================");
 
       const match =
         await bcrypt.compare(
@@ -286,11 +274,9 @@ res.json({
   user,
 });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
         error:
-          err.message,
+          "Login failed",
       });
     }
   }
@@ -353,11 +339,9 @@ router.get(
           "Email verified successfully.",
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
         error:
-          err.message,
+          "Email verification failed",
       });
     }
   }
@@ -374,14 +358,17 @@ router.post(
       const { email } =
         req.body;
 
+      if (!email) {
+        return res.status(400).json({
+          error: "Email is required.",
+        });
+      }
+
       const user =
         await User.findOne({
           email:
             email.toLowerCase(),
         });
-
-        console.log("========== RESEND ==========");
-console.log(user);
 
       if (!user) {
         return res.status(404).json({
@@ -429,18 +416,10 @@ hashedVerificationToken;
 
       await user.save();
 
-      console.log(
-  "Saved token:",
-  user.emailVerificationToken
-);
-
-      const result =
-  await sendVerificationEmail(
-    user,
-    verificationToken
-  );
-
-console.log(result);
+      await sendVerificationEmail(
+        user,
+        verificationToken
+      );
 
       res.json({
         success: true,
@@ -449,11 +428,9 @@ console.log(result);
           "Verification email sent successfully.",
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
         error:
-          err.message,
+          "Failed to resend verification email",
       });
     }
   }
@@ -549,11 +526,9 @@ const hashedResetToken =
           "If an account exists, a password reset email has been sent.",
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
         error:
-          err.message,
+          "Failed to send password reset email",
       });
     }
   }
@@ -661,11 +636,9 @@ if (!passwordRegex.test(password)) {
           "Password reset successfully.",
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
         error:
-          err.message,
+          "Password reset failed",
       });
     }
   }
@@ -705,10 +678,8 @@ router.post(
         token: accessToken,
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to refresh token",
       });
     }
   }
@@ -748,10 +719,8 @@ router.post(
           "Logged out successfully.",
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Logout failed",
       });
     }
   }
@@ -768,6 +737,13 @@ router.post(
       const {
         userId,
       } = req.body;
+
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid ID.",
+        });
+      }
 
       const user =
         await User.findById(
@@ -792,11 +768,9 @@ router.post(
           "All sessions logged out.",
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
         error:
-          err.message,
+          "Failed to log out sessions",
       });
     }
   }

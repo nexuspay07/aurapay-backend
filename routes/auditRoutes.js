@@ -5,6 +5,9 @@ const router = express.Router();
 const AuditLog = require(
   "../models/AuditLog"
 );
+const auth = require("../middlewares/auth");
+const adminAuth = require("../middlewares/adminAuth");
+const permission = require("../middlewares/permission");
 
 // ======================================
 // GET AUDIT LOGS
@@ -12,6 +15,9 @@ const AuditLog = require(
 
 router.get(
   "/logs",
+  auth,
+  adminAuth,
+  permission("audit:view"),
   async (req, res) => {
     try {
       const logs =
@@ -27,10 +33,8 @@ router.get(
 
       res.json(logs);
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to load audit logs",
       });
     }
   }

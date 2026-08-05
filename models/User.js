@@ -10,11 +10,6 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
     },
 
-    password: {
-      type: String,
-      required: true,
-    },
-
     role: {
       type: String,
       enum: [
@@ -43,24 +38,6 @@ const userSchema = new mongoose.Schema(
       ref: "Merchant",
       default: null,
     },
-
-    emailVerificationToken: {
-  type: String,
-  default: null,
-  index: true,
-},
-
-passwordResetToken: {
-  type: String,
-  default: null,
-  index: true,
-},
-
-refreshToken: {
-  type: String,
-  default: null,
-  index: true,
-},
 
 password: {
   type: String,
@@ -127,11 +104,6 @@ refreshToken: {
       index: true,
     },
 
-    emailVerificationToken: {
-      type: String,
-      default: null,
-    },
-
     emailVerificationExpires: {
       type: Date,
       default: null,
@@ -141,11 +113,6 @@ refreshToken: {
     // PASSWORD RESET
     // =====================================
 
-    passwordResetToken: {
-      type: String,
-      default: null,
-    },
-
     passwordResetExpires: {
       type: Date,
       default: null,
@@ -154,16 +121,6 @@ refreshToken: {
     // =====================================
     // SESSION MANAGEMENT
     // =====================================
-
-    refreshToken: {
-      type: String,
-      default: null,
-    },
-
-    refreshTokenExpires: {
-  type: Date,
-  default: null,
-},
 
     refreshTokenExpires: {
   type: Date,

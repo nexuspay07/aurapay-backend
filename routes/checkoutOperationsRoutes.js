@@ -2,203 +2,147 @@ const express = require("express");
 
 const router = express.Router();
 
+const merchantAuth =
+  require("../middlewares/merchantAuth");
+
+const checkoutOperationsController =
+  require("../controllers/checkoutOperationsController");
+
 const CheckoutSession =
-  require(
-    "../models/CheckoutSession"
-  );
+  require("../models/CheckoutSession");
 
-  const Transaction =
-  require("../models/Transaction");
+const mongoose = require("mongoose");
 
-  console.log(
-  "STRIPE KEY:",
-  process.env.STRIPE_KEY
+function invalidId(res) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid ID.",
+  });
+}
+
+// ======================================
+// CREATE CHECKOUT SESSION
+// ======================================
+
+router.post(
+  "/sessions",
+  merchantAuth,
+  checkoutOperationsController.createSession
 );
 
-  const stripe =
-  require("stripe")(
-    process.env.STRIPE_KEY
-  );
+// ======================================
+// GET ALL MERCHANT SESSIONS
+// ======================================
 
-  // ======================================
-// GET SINGLE SESSION
+router.get(
+  "/sessions",
+  merchantAuth,
+  checkoutOperationsController.getMerchantSessions
+);
+
+// ======================================
+// GET SESSION BY SESSION ID
 // ======================================
 
 router.get(
   "/sessions/by-code/:sessionId",
-  async (req, res) => {
-    try {
-      const session =
-        await CheckoutSession.findOne(
-          {
-            sessionId:
-              req.params
-                .sessionId,
-          }
-        );
-
-      if (!session) {
-        return res.status(404).json({
-          error:
-            "Session not found",
-        });
-      }
-
-      res.json(session);
-    } catch (err) {
-      res.status(500).json({
-        error:
-          err.message,
-      });
-    }
-  }
+  checkoutOperationsController.getSession
 );
 
-  // ======================================
-// CREATE PAYMENT INTENT
+// ======================================
+// CREATE STRIPE PAYMENT INTENT
+// (PUBLIC ROUTE)
 // ======================================
 
 router.post(
   "/sessions/:id/pay",
+  checkoutOperationsController.createPaymentIntent
+);
+
+// ======================================
+// MARK SESSION AS PAID
+// (USED BY WEBHOOK / INTERNAL)
+// ======================================
+
+router.patch(
+  "/sessions/:id/status",
+  merchantAuth,
+  checkoutOperationsController.markPaid
+);
+
+router.patch(
+  "/sessions/:id/archive",
+  merchantAuth,
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return invalidId(res);
+      }
+
       const session =
-        await CheckoutSession.findById(
-          req.params.id
+        await CheckoutSession.findOneAndUpdate(
+          {
+            _id: req.params.id,
+            merchant: req.merchant._id,
+          },
+          {
+            status: "expired",
+          },
+          {
+            new: true,
+          }
         );
 
       if (!session) {
         return res.status(404).json({
-          error:
-            "Session not found",
+          success: false,
+          error: "Checkout session not found.",
         });
       }
 
-      const paymentIntent =
-        await stripe.paymentIntents.create(
-          {
-            amount:
-              Math.round(
-                session.amount *
-                  100
-              ),
-
-            currency:
-              session.currency.toLowerCase(),
-          }
-        );
-
-      session.stripePaymentIntentId =
-        paymentIntent.id;
-
-        await Transaction.create({
-  user: null,
-
-  amount: session.amount,
-
-  currency:
-    session.currency,
-
-  provider: "Stripe",
-
-  transactionId:
-    paymentIntent.id,
-
-  providerPaymentId:
-    paymentIntent.id,
-
-  status: "processing",
-
-  paymentType: "stripe",
-
-  success: false,
-});
-
-      await session.save();
-
-      res.json({
-        clientSecret:
-          paymentIntent.client_secret,
+      return res.json({
+        success: true,
+        session,
       });
     } catch (err) {
-      res.status(500).json({
-        error:
-          err.message,
+      return res.status(500).json({
+        success: false,
+        error: "Failed to archive checkout session.",
       });
     }
   }
 );
 
-  // ======================================
-// CREATE CHECKOUT SESSION
-// ======================================
-
-
-
-router.post(
-  "/sessions",
+router.delete(
+  "/sessions/:id",
+  merchantAuth,
   async (req, res) => {
     try {
-      const {
-        merchant,
-        amount,
-        currency,
-        customerEmail,
-      } = req.body;
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return invalidId(res);
+      }
 
       const session =
-        await CheckoutSession.create({
-          merchant,
-
-          sessionId:
-            "CHK_" +
-            Date.now(),
-
-          amount,
-
-          currency:
-            currency || "USD",
-
-          customerEmail:
-            customerEmail || "",
-
-          status:
-            "created",
+        await CheckoutSession.findOneAndDelete({
+          _id: req.params.id,
+          merchant: req.merchant._id,
         });
 
-      res.status(201).json(
-        session
-      );
-    } catch (err) {
-      res.status(500).json({
-        error:
-          err.message,
+      if (!session) {
+        return res.status(404).json({
+          success: false,
+          error: "Checkout session not found.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Checkout session deleted.",
       });
-    }
-  }
-);
-
-// ======================================
-// GET ALL CHECKOUT SESSIONS
-// ======================================
-
-router.get(
-  "/sessions",
-  async (req, res) => {
-    try {
-      const sessions =
-        await CheckoutSession.find()
-          .populate(
-            "merchant"
-          )
-          .sort({
-            createdAt: -1,
-          });
-
-      res.json(sessions);
     } catch (err) {
-      res.status(500).json({
-        error: err.message,
+      return res.status(500).json({
+        success: false,
+        error: "Failed to delete checkout session.",
       });
     }
   }

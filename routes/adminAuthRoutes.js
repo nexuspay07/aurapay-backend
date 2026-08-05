@@ -6,6 +6,9 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 const User = require("../models/User");
+const auth = require("../middlewares/auth");
+const adminAuth = require("../middlewares/adminAuth");
+const permission = require("../middlewares/permission");
 
 // ======================================
 // AVAILABLE PERMISSIONS
@@ -71,15 +74,10 @@ router.post(
         password,
       } = req.body;
 
-      console.log(
-        "ADMIN LOGIN:",
-        email
-      );
-
       const user =
         await User.findOne({
           email,
-        });
+        }).select("+password");
 
       if (!user) {
         return res
@@ -122,11 +120,6 @@ router.post(
           password,
           user.password
         );
-
-      console.log(
-        "PASSWORD MATCH:",
-        match
-      );
 
       if (!match) {
         return res
@@ -176,14 +169,8 @@ router.post(
         },
       });
     } catch (err) {
-      console.log(
-        "ADMIN LOGIN ERROR:"
-      );
-
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Admin login failed",
       });
     }
   }
@@ -195,6 +182,9 @@ router.post(
 
 router.post(
   "/create-admin",
+  auth,
+  adminAuth,
+  permission("admin:create"),
   async (req, res) => {
     try {
       const {
@@ -287,10 +277,8 @@ router.post(
         },
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to create admin",
       });
     }
   }
@@ -302,6 +290,8 @@ router.post(
 
 router.get(
   "/admins",
+  auth,
+  adminAuth,
   async (req, res) => {
     try {
       const admins =
@@ -323,10 +313,8 @@ router.get(
 
       res.json(admins);
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to load admins",
       });
     }
   }

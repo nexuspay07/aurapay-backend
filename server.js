@@ -1,4 +1,5 @@
 require("dotenv").config();
+//require("./jobs/eventDispatcherJob");
 
 const http = require("http");
 
@@ -16,6 +17,10 @@ const initializeSocket =
 
 const server =
   http.createServer(app);
+
+  server.on("request", (req, res) => {
+  console.log("SERVER RECEIVED:", req.method, req.url);
+});
 
 // ======================================
 // SOCKET.IO

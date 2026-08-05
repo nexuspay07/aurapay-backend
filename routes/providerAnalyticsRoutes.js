@@ -97,9 +97,8 @@ router.get("/", auth, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("❌ PROVIDER ANALYTICS ERROR:", err);
     res.status(500).json({
-      error: err.message || "Failed to load provider analytics",
+      error: "Failed to load provider analytics",
     });
   }
 });

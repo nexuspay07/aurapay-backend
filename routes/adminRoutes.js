@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 
 const auth = require("../middlewares/auth");
 
@@ -16,6 +17,13 @@ const FraudLog = require("../models/FraudLog");
 const AuditLog = require("../models/AuditLog");
 
 const createAuditLog = require("../utils/createAuditLog");
+
+function invalidId(res) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid ID.",
+  });
+}
 
 // ======================================
 // GLOBAL ADMIN PROTECTION
@@ -49,7 +57,7 @@ router.get("/users", async (req, res) => {
     res.json(users);
   } catch (err) {
     res.status(500).json({
-      error: err.message,
+      error: "Failed to load users",
     });
   }
 });
@@ -70,7 +78,7 @@ router.get("/transactions", async (req, res) => {
     res.json(transactions);
   } catch (err) {
     res.status(500).json({
-      error: err.message,
+      error: "Failed to load transactions",
     });
   }
 });
@@ -89,7 +97,7 @@ router.get("/ledger", async (req, res) => {
     res.json(entries);
   } catch (err) {
     res.status(500).json({
-      error: err.message,
+      error: "Failed to load ledger entries",
     });
   }
 });
@@ -107,7 +115,7 @@ router.get("/fraud-logs", async (req, res) => {
     res.json(logs);
   } catch (err) {
     res.status(500).json({
-      error: err.message,
+      error: "Failed to load fraud logs",
     });
   }
 });
@@ -124,6 +132,10 @@ router.post(
   ]),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return invalidId(res);
+      }
+
       const { reason, hours } = req.body;
 
       const freezeUntil = hours
@@ -173,7 +185,7 @@ router.post(
       });
     } catch (err) {
       res.status(500).json({
-        error: err.message,
+        error: "Failed to freeze user",
       });
     }
   }
@@ -191,6 +203,10 @@ router.post(
   ]),
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return invalidId(res);
+      }
+
       const user =
         await User.findByIdAndUpdate(
           req.params.id,
@@ -221,7 +237,7 @@ router.post(
       });
     } catch (err) {
       res.status(500).json({
-        error: err.message,
+        error: "Failed to unfreeze user",
       });
     }
   }
@@ -248,7 +264,7 @@ router.get(
       res.json(logs);
     } catch (err) {
       res.status(500).json({
-        error: err.message,
+        error: "Failed to load audit logs",
       });
     }
   }
@@ -353,10 +369,8 @@ router.get(
         successRate,
       });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to load metrics",
       });
     }
   }

@@ -2,7 +2,7 @@ const express = require("express");
 
 const router = express.Router();
 
-const auth = require("../middlewares/auth");
+const merchantAuth = require("../middlewares/merchantAuth");
 
 const checkoutController =
   require("../controllers/checkout");
@@ -14,14 +14,14 @@ const checkoutController =
 // Create Checkout
 router.post(
   "/",
-  auth,
+  merchantAuth,
   checkoutController.createCheckout
 );
 
 // Merchant Dashboard
 router.get(
   "/merchant",
-  auth,
+  merchantAuth,
   checkoutController.listMerchantCheckouts
 );
 
@@ -34,28 +34,28 @@ router.get(
 // Update Checkout
 router.put(
   "/:id",
-  auth,
+  merchantAuth,
   checkoutController.updateCheckout
 );
 
 // Delete Checkout
 router.delete(
   "/:id",
-  auth,
+  merchantAuth,
   checkoutController.deleteCheckout
 );
 
 // Publish Checkout
 router.patch(
   "/:id/publish",
-  auth,
+  merchantAuth,
   checkoutController.publishCheckout
 );
 
 // Archive Checkout
 router.patch(
   "/:id/archive",
-  auth,
+  merchantAuth,
   checkoutController.archiveCheckout
 );
 

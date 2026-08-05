@@ -1,20 +1,27 @@
 const express = require("express");
-
-const router = express.Router();
-
-const Merchant = require("../models/Merchant");
-
+const mongoose = require("mongoose");
 const bcrypt =
   require("bcryptjs");
+const crypto = require("crypto");
 
-  const crypto = require("crypto");
+const auth = require("../middlewares/auth");
+const adminAuth = require("../middlewares/adminAuth");
+const Merchant = require("../models/Merchant");
+const User =
+  require("../models/User");
 
 const {
   sendVerificationEmail,
 } = require("../services/emailService");
 
-const User =
-  require("../models/User");
+const router = express.Router();
+
+function invalidId(res) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid ID.",
+  });
+}
 
 // ======================================
 // CREATE MERCHANT
@@ -75,61 +82,51 @@ router.post(
         });
 
       const verificationToken =
-  crypto.randomBytes(32).toString("hex");
+        crypto.randomBytes(32).toString("hex");
 
-const hashedVerificationToken =
-  crypto
-    .createHash("sha256")
-    .update(verificationToken)
-    .digest("hex");
+      const hashedVerificationToken =
+        crypto
+          .createHash("sha256")
+          .update(verificationToken)
+          .digest("hex");
 
-const owner =
-  await User.create({
-    email: ownerEmail,
+      const owner =
+        await User.create({
+          email: ownerEmail,
+          password: hashedPassword,
+          role: "merchant_owner",
+          merchantId: merchant._id,
+          status: "unverified",
+          emailVerified: false,
+          emailVerificationToken:
+            hashedVerificationToken,
+          emailVerificationExpires:
+            new Date(
+              Date.now() +
+              24 * 60 * 60 * 1000
+            ),
+        });
 
-    password: hashedPassword,
-
-    role: "merchant_owner",
-
-    merchantId: merchant._id,
-
-    status: "unverified",
-
-    emailVerified: false,
-
-    emailVerificationToken:
-      hashedVerificationToken,
-
-    emailVerificationExpires:
-      new Date(
-        Date.now() +
-        24 * 60 * 60 * 1000
-      ),
-  });
-
-await sendVerificationEmail(
-  owner,
-  verificationToken
-);
+      await sendVerificationEmail(
+        owner,
+        verificationToken
+      );
 
       res.status(201).json({
-  success: true,
-
-  message:
-    "Merchant created. Please check your email to verify your account.",
-
-  merchant,
-});
+        success: true,
+        message:
+          "Merchant created. Please check your email to verify your account.",
+        merchant,
+      });
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
         error:
-          err.message,
+          "Merchant registration failed",
       });
     }
   }
 );
+
 // ======================================
 // GET ALL MERCHANTS
 // ======================================
@@ -143,10 +140,8 @@ router.get("/", async (req, res) => {
 
     res.json(merchants);
   } catch (err) {
-    console.log(err);
-
     res.status(500).json({
-      error: err.message,
+      error: "Failed to load merchants",
     });
   }
 });
@@ -157,6 +152,10 @@ router.get("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return invalidId(res);
+    }
+
     const merchant =
       await Merchant.findById(
         req.params.id
@@ -171,10 +170,9 @@ router.get("/:id", async (req, res) => {
 
     res.json(merchant);
   } catch (err) {
-    console.log(err);
-
     res.status(500).json({
-      error: err.message,
+      error:
+        "Failed to load merchant",
     });
   }
 });
@@ -185,8 +183,14 @@ router.get("/:id", async (req, res) => {
 
 router.patch(
   "/:id/verify",
+  auth,
+  adminAuth,
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return invalidId(res);
+      }
+
       const merchant =
         await Merchant.findByIdAndUpdate(
           req.params.id,
@@ -201,10 +205,8 @@ router.patch(
 
       res.json(merchant);
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to verify merchant",
       });
     }
   }
@@ -216,8 +218,14 @@ router.patch(
 
 router.patch(
   "/:id/reject",
+  auth,
+  adminAuth,
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return invalidId(res);
+      }
+
       const merchant =
         await Merchant.findByIdAndUpdate(
           req.params.id,
@@ -232,10 +240,8 @@ router.patch(
 
       res.json(merchant);
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to reject merchant",
       });
     }
   }
@@ -247,8 +253,14 @@ router.patch(
 
 router.patch(
   "/:id/risk",
+  auth,
+  adminAuth,
   async (req, res) => {
     try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return invalidId(res);
+      }
+
       const merchant =
         await Merchant.findByIdAndUpdate(
           req.params.id,
@@ -263,10 +275,8 @@ router.patch(
 
       res.json(merchant);
     } catch (err) {
-      console.log(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to update merchant risk",
       });
     }
   }

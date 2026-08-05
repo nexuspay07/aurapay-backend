@@ -92,11 +92,9 @@ exports.createCheckout = async (req, res) => {
 
   } catch (err) {
 
-    console.error(err);
-
     res.status(500).json({
       error:
-        err.message,
+        "Failed to create checkout",
     });
 
   }
@@ -110,10 +108,8 @@ exports.getCheckout = async (req, res) => {
   try {
     // TODO
   } catch (err) {
-    console.error(err);
-
     res.status(500).json({
-      error: err.message,
+      error: "Failed to load checkout",
     });
   }
 };
@@ -126,10 +122,8 @@ exports.updateCheckout = async (req, res) => {
   try {
     // TODO
   } catch (err) {
-    console.error(err);
-
     res.status(500).json({
-      error: err.message,
+      error: "Failed to update checkout",
     });
   }
 };
@@ -142,10 +136,8 @@ exports.deleteCheckout = async (req, res) => {
   try {
     // TODO
   } catch (err) {
-    console.error(err);
-
     res.status(500).json({
-      error: err.message,
+      error: "Failed to delete checkout",
     });
   }
 };
@@ -161,10 +153,8 @@ exports.listMerchantCheckouts = async (
   try {
     // TODO
   } catch (err) {
-    console.error(err);
-
     res.status(500).json({
-      error: err.message,
+      error: "Failed to list merchant checkouts",
     });
   }
 };
@@ -180,10 +170,8 @@ exports.publishCheckout = async (
   try {
     // TODO
   } catch (err) {
-    console.error(err);
-
     res.status(500).json({
-      error: err.message,
+      error: "Failed to publish checkout",
     });
   }
 };
@@ -199,10 +187,8 @@ exports.archiveCheckout = async (
   try {
     // TODO
   } catch (err) {
-    console.error(err);
-
     res.status(500).json({
-      error: err.message,
+      error: "Failed to archive checkout",
     });
   }
 };

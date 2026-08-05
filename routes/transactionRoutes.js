@@ -6,9 +6,13 @@ const router =
 
 const Transaction =
   require("../models/Transaction");
+const auth = require("../middlewares/auth");
+const adminAuth = require("../middlewares/adminAuth");
 
 router.get(
   "/",
+  auth,
+  adminAuth,
   async (req, res) => {
     try {
       const transactions =
@@ -23,7 +27,7 @@ router.get(
     } catch (err) {
       res.status(500).json({
         error:
-          err.message,
+          "Failed to load transactions",
       });
     }
   }

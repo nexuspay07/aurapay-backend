@@ -1,73 +1,37 @@
 const { Resend } = require("resend");
 
-const resend = new Resend(
-  process.env.RESEND_API_KEY
-);
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ======================================
 // GENERIC EMAIL
 // ======================================
 
-async function sendEmail({
-  to,
-  subject,
-  html,
-}) {
-  console.log("=================================");
-  console.log("📧 EMAIL DEBUG");
-  console.log("FROM:", process.env.EMAIL_FROM);
-  console.log("TO:", to);
-  console.log("SUBJECT:", subject);
-
-  try {
-    const response =
-      await resend.emails.send({
-        from: process.env.EMAIL_FROM,
-        to,
-        subject,
-        html,
-      });
-
-    console.log("✅ RESEND RESPONSE:");
-    console.log(response);
-    console.log("=================================");
-
-    return response;
-  } catch (err) {
-    console.log("❌ RESEND ERROR:");
-    console.log(err);
-    console.log("=================================");
-
-    throw err;
-  }
+async function sendEmail({ to, subject, html }) {
+  return resend.emails.send({
+    from: process.env.EMAIL_FROM,
+    to,
+    subject,
+    html,
+  });
 }
-
-console.log(
-  "API KEY:",
-  process.env.RESEND_API_KEY?.slice(0, 12)
-);
 
 // ======================================
 // EMAIL VERIFICATION
 // ======================================
 
-async function sendVerificationEmail(
-  user,
-  token
-) {
+async function sendVerificationEmail(user, token) {
   const verificationLink =
-`${process.env.FRONTEND_URL}/verify-email/${token}`;
+    `${process.env.FRONTEND_URL}/verify-email/${token}`;
 
   return sendEmail({
     to: user.email,
 
-    subject:
-      "Verify your AuraPay account",
+    subject: "Verify your AuraPay account",
 
     html: `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 
-        <h2>Welcome to AuraPay 👋</h2>
+        <h2>Welcome to AuraPay</h2>
 
         <p>
           Thank you for creating your AuraPay account.
@@ -113,18 +77,14 @@ async function sendVerificationEmail(
 // PASSWORD RESET
 // ======================================
 
-async function sendPasswordResetEmail(
-  user,
-  token
-) {
+async function sendPasswordResetEmail(user, token) {
   const resetLink =
-`${process.env.FRONTEND_URL}/reset-password/${token}`;
+    `${process.env.FRONTEND_URL}/reset-password/${token}`;
 
   return sendEmail({
     to: user.email,
 
-    subject:
-      "Reset your AuraPay password",
+    subject: "Reset your AuraPay password",
 
     html: `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">

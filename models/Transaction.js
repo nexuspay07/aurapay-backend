@@ -2,54 +2,88 @@ const mongoose = require("mongoose");
 
 const transactionSchema = new mongoose.Schema(
   {
+    // ======================================
+    // RELATIONSHIPS
+    // ======================================
+
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: false,
+      default: null,
+      index: true,
     },
 
     merchant: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "Merchant",
-  required: true,
-  index: true,
-},
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Merchant",
+      required: true,
+      index: true,
+    },
 
-checkoutSession: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "CheckoutSession",
-  default: null,
-  index: true,
-},
+    checkoutSession: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CheckoutSession",
+      default: null,
+      index: true,
+    },
+
+    settlement: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Settlement",
+      default: null,
+      index: true,
+    },
+
+    // ======================================
+    // PAYMENT INFORMATION
+    // ======================================
 
     amount: {
       type: Number,
       required: true,
+      min: 0,
     },
 
     currency: {
       type: String,
       required: true,
       lowercase: true,
+      trim: true,
     },
-
-    customerName: {
-  type: String,
-  default: "",
-  trim: true,
-},
-
-customerEmail: {
-  type: String,
-  default: "",
-  lowercase: true,
-  trim: true,
-},
 
     provider: {
       type: String,
+      enum: ["Stripe", "PayPal", "Internal", "Test"],
       default: "Stripe",
+      index: true,
     },
+
+    paymentType: {
+      type: String,
+      enum: ["stripe", "paypal", "internal", "test"],
+      default: "stripe",
+    },
+
+    // ======================================
+    // CUSTOMER
+    // ======================================
+
+    customerName: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    customerEmail: {
+      type: String,
+      default: "",
+      lowercase: true,
+      trim: true,
+    },
+
+    // ======================================
+    // PROVIDER IDS
+    // ======================================
 
     transactionId: {
       type: String,
@@ -69,6 +103,10 @@ customerEmail: {
       index: true,
     },
 
+    // ======================================
+    // STATUS
+    // ======================================
+
     status: {
       type: String,
       enum: [
@@ -87,13 +125,12 @@ customerEmail: {
     success: {
       type: Boolean,
       default: false,
+      index: true,
     },
 
-    paymentType: {
-      type: String,
-      enum: ["stripe", "paypal", "internal", "test"],
-      default: "test",
-    },
+    // ======================================
+    // PERFORMANCE
+    // ======================================
 
     latency: {
       type: Number,
@@ -109,6 +146,15 @@ customerEmail: {
       type: String,
       default: null,
     },
+
+    rawProviderResponse: {
+      type: Object,
+      default: null,
+    },
+
+    // ======================================
+    // ROUTING
+    // ======================================
 
     recommendedProvider: {
       type: String,
@@ -126,6 +172,10 @@ customerEmail: {
       default: "manual",
     },
 
+    // ======================================
+    // FEES
+    // ======================================
+
     estimatedFee: {
       type: Number,
       default: 0,
@@ -136,9 +186,14 @@ customerEmail: {
       default: 0,
     },
 
-    costScore: {
-      type: String,
-      default: "0.0",
+    merchantFee: {
+      type: Number,
+      default: 0,
+    },
+
+    merchantNet: {
+      type: Number,
+      default: 0,
     },
 
     platformFee: {
@@ -151,97 +206,98 @@ customerEmail: {
       default: 0,
     },
 
-    merchantFee: {
-  type: Number,
-  default: 0,
-},
-
-merchantNet: {
-  type: Number,
-  default: 0,
-},
-
     profitMargin: {
       type: Number,
       default: 0,
     },
 
-    rawProviderResponse: {
-      type: Object,
+    costScore: {
+      type: String,
+      default: "0.0",
+    },
+
+    // ======================================
+    // SETTLEMENT
+    // ======================================
+
+    settled: {
+      type: Boolean,
+      default: false,
+    },
+
+    settledAt: {
+      type: Date,
       default: null,
     },
+
+    // ======================================
+    // REFUND
+    // ======================================
+
+    refund: {
+      providerRefundId: {
+        type: String,
+        default: null,
+        index: true,
+      },
+
+      providerRefundStatus: {
+        type: String,
+        default: null,
+      },
+
+      refundAmount: {
+        type: Number,
+        default: 0,
+      },
+
+      refundCurrency: {
+        type: String,
+        default: null,
+        lowercase: true,
+      },
+
+      refundReason: {
+        type: String,
+        default: "requested_by_user",
+      },
+
+      refundRequestedAt: {
+        type: Date,
+        default: null,
+      },
+
+      refundCompletedAt: {
+        type: Date,
+        default: null,
+      },
+    },
+
+    // ======================================
+    // AUDIT
+    // ======================================
 
     confirmedAt: {
       type: Date,
       default: null,
     },
 
-    settlement: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: "Settlement",
-  default: null,
-},
-
-settled: {
-  type: Boolean,
-  default: false,
-},
-
-settledAt: {
-  type: Date,
-  default: null,
-},
-
     failedAt: {
       type: Date,
       default: null,
     },
-
-    refund: {
-  providerRefundId: {
-    type: String,
-    default: null,
-    index: true,
-  },
-
-  providerRefundStatus: {
-    type: String,
-    default: null,
-  },
-
-  refundAmount: {
-    type: Number,
-    default: 0,
-  },
-
-  refundCurrency: {
-    type: String,
-    default: null,
-    lowercase: true,
-  },
-
-  refundReason: {
-    type: String,
-    default: "requested_by_user",
-  },
-
-  refundRequestedAt: {
-    type: Date,
-    default: null,
-  },
-
-  refundCompletedAt: {
-    type: Date,
-    default: null,
-  },
-},
 
     refundedAt: {
       type: Date,
       default: null,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-module.exports = mongoose.model("Transaction", transactionSchema);
+module.exports = mongoose.model(
+  "Transaction",
+  transactionSchema
+);

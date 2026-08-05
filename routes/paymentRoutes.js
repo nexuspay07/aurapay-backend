@@ -1,6 +1,13 @@
 console.log("🔥 paymentRoutes LOADED");
 
+const {
+  validateWalletBalance,
+  debitWallet,
+  refundConvertedBalance,
+} = require("../services/walletService");
+
 const express = require("express");
+const mongoose = require("mongoose");
 const router = express.Router();
 
 const Transaction = require("../models/Transaction");
@@ -20,9 +27,10 @@ const {
 const { createLedgerEntry } = require("../services/ledgerService");
 const { payWithStripe } = require("../services/stripeService");
 const { payWithPayPal } = require("../services/paypalService");
-const { convert } = require("../services/fxservice");
 const permissions = require("../middlewares/permission");
 const { calculateProfit } = require("../services/profitService");
+const { convert } = require("../services/fxService");
+const settlementService = require("../services/settlementService");
 
 const { detectFraud } = require("../services/fraudService");
 const { estimateProviderFee } = require("../services/providerFeeService");
@@ -221,8 +229,6 @@ router.post("/pay", auth, async (req, res) => {
     });
   }
 
-  console.log("🔥 NEW PAYMENT REQUEST:", req.body);
-
   try {
     const amount = Number(req.body.amount);
     const currency = String(req.body.currency || "").toLowerCase();
@@ -404,36 +410,85 @@ router.post("/pay", auth, async (req, res) => {
     const balanceAfter = Number(updatedUser.balance?.[currency] || 0);
 
     const transaction = await Transaction.create({
-      user: req.user._id,
+
+      merchant:
+        req.user.merchantId,
+
+      user:
+        req.user._id,
+
       amount,
+
       currency,
-      provider: providerUsed,
-      transactionId: result.id || null,
-      providerPaymentId: result.id || null,
-      status: normalizeStatus(result.status),
-      latency: result.latency || 0,
+
+      provider:
+        providerUsed,
+
+      transactionId:
+        result.id || null,
+
+      providerPaymentId:
+        result.id || null,
+
+      status:
+        normalizeStatus(result.status),
+
+      latency:
+        result.latency || 0,
+
       attempts,
-      errorMessage: result.error || null,
-      success: true,
-      paymentType: providerUsed === "Stripe" ? "stripe" : "paypal",
 
-      recommendedProvider: routingExplanation.recommendedProvider,
-      attemptOrder: providerOrder,
-      selectionMode: "auto",
+      errorMessage:
+        result.error || null,
 
-      estimatedFee: selectedProviderFee?.estimatedFee || 0,
-      estimatedNet: selectedProviderFee?.estimatedNet || amount,
-      costScore: selectedProviderFee?.costScore || "0.0",
-      estimatedProviderProfit: selectedProviderFee?.estimatedProfit || 0,
-      providerProfitScore: selectedProviderFee?.profitScore || "0.0",
+      success:
+        true,
 
-      platformFee: profitData.platformFee,
-      estimatedProfit: profitData.estimatedProfit,
-      profitMargin: profitData.profitMargin,
+      paymentType:
+        providerUsed === "Stripe"
+          ? "stripe"
+          : "paypal",
 
-      rawProviderResponse: result,
-      confirmedAt: new Date(),
-    });
+      recommendedProvider:
+        routingExplanation.recommendedProvider,
+
+      attemptOrder:
+        providerOrder,
+
+      selectionMode:
+        "auto",
+
+      estimatedFee:
+        selectedProviderFee?.estimatedFee || 0,
+
+      estimatedNet:
+        selectedProviderFee?.estimatedNet || amount,
+
+      costScore:
+        selectedProviderFee?.costScore || "0.0",
+
+      estimatedProviderProfit:
+        selectedProviderFee?.estimatedProfit || 0,
+
+      providerProfitScore:
+        selectedProviderFee?.profitScore || "0.0",
+
+      platformFee:
+        profitData.platformFee,
+
+      estimatedProfit:
+        profitData.estimatedProfit,
+
+      profitMargin:
+        profitData.profitMargin,
+
+      rawProviderResponse:
+        result,
+
+      confirmedAt:
+        new Date(),
+
+});
 
     await createLedgerEntry({
       user: req.user._id,
@@ -524,9 +579,8 @@ if (!accountingValidation.balanced) {
       },
     });
   } catch (error) {
-    console.log("🔥 FULL ERROR:", error);
     return res.status(500).json({
-      error: error.message,
+      error: "Payment failed",
     });
   }
 });
@@ -549,8 +603,7 @@ router.get("/ledger", auth, async (req, res) => {
 
     res.json(entries);
   } catch (err) {
-    console.log("❌ Ledger fetch error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to load ledger" });
   }
 });
 
@@ -628,8 +681,7 @@ router.get("/intelligence", async (req, res) => {
 
     res.json(stats);
   } catch (err) {
-    console.log("❌ INTELLIGENCE ERROR:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to load payment intelligence" });
   }
 });
 
@@ -647,6 +699,13 @@ router.post(
   permissions(["finance_admin", "super_admin"]),
   async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.transactionId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID.",
+      });
+    }
+
     const transaction = await Transaction.findOne({
       _id: req.params.transactionId,
       user: req.user._id,
@@ -821,6 +880,18 @@ router.post(
 
     await transaction.save();
 
+    // ======================================
+// UPDATE SETTLEMENT
+// ======================================
+
+await settlementService.applyRefund(
+
+  transaction._id,
+
+  amount
+
+);
+
     // =========================================
     // ACCOUNTING VALIDATION
     // =========================================
@@ -849,10 +920,8 @@ router.post(
       accounting: accountingValidation,
     });
   } catch (err) {
-    console.log("❌ Refund error:", err);
-
     return res.status(500).json({
-      error: err.message,
+      error: "Refund failed",
     });
   }
 });

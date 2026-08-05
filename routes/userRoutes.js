@@ -10,7 +10,7 @@ router.get("/me", auth, async (req, res) => {
 
     res.json(user);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to load user profile" });
   }
 });
 
@@ -19,7 +19,7 @@ router.get("/balance", auth, async (req, res) => {
     const user = await User.findById(req.user._id).select("balance");
     res.json(user.balance);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to load user balance" });
   }
 });
 
@@ -32,7 +32,7 @@ router.get("/risk-status", auth, async (req, res) => {
       fraudCount: 0,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to load risk status" });
   }
 });
 

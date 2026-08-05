@@ -1,6 +1,10 @@
 const express = require("express");
 const router = express.Router();
 
+const auth = require("../middlewares/auth");
+const adminAuth = require("../middlewares/adminAuth");
+const permission = require("../middlewares/permission");
+
 const Transaction =
   require("../models/Transaction");
 
@@ -18,6 +22,9 @@ const User =
 
 router.get(
   "/dashboard",
+  auth,
+  adminAuth,
+  permission("analytics:view"),
   async (req, res) => {
     try {
       // =====================================
@@ -189,10 +196,8 @@ router.get(
         recentSettlements,
       });
     } catch (err) {
-      console.error(err);
-
       res.status(500).json({
-        error: err.message,
+        error: "Failed to load admin analytics",
       });
     }
   }

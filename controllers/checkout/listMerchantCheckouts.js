@@ -1,4 +1,5 @@
-const Checkout = require("../../models/Checkout");
+const Checkout =
+  require("../../models/Checkout");
 
 module.exports =
   async function listMerchantCheckouts(
@@ -6,6 +7,10 @@ module.exports =
     res
   ) {
     try {
+
+      // ======================================
+      // PAGINATION
+      // ======================================
 
       const page =
         Math.max(
@@ -22,21 +27,34 @@ module.exports =
       const skip =
         (page - 1) * limit;
 
+      // ======================================
+      // FILTER
+      // ======================================
+
       const filter = {
+
         merchantId:
-          req.user.merchantId,
+          req.merchant._id,
+
       };
 
       if (req.query.status) {
+
         filter.status =
           req.query.status;
+
       }
+
+      // ======================================
+      // DATABASE
+      // ======================================
 
       const [
         checkouts,
         total,
       ] =
         await Promise.all([
+
           Checkout.find(filter)
             .sort({
               createdAt: -1,
@@ -47,9 +65,15 @@ module.exports =
           Checkout.countDocuments(
             filter
           ),
+
         ]);
 
+      // ======================================
+      // RESPONSE
+      // ======================================
+
       return res.json({
+
         success: true,
 
         page,
@@ -64,16 +88,25 @@ module.exports =
           ),
 
         checkouts,
+
       });
 
     } catch (err) {
 
-      console.error(err);
+      console.error(
+        "[LIST CHECKOUTS]",
+        err
+      );
 
       return res.status(500).json({
+
+        success: false,
+
         error:
-          "Failed to load checkouts.",
+          "Failed to load merchant checkouts.",
+
       });
 
     }
+
   };
