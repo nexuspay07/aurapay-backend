@@ -6,6 +6,24 @@ const router =
 
 const applicationService =
   require("../services/applicationService");
+const auth = require("../middlewares/auth");
+const { ADMIN_ROLES } = require("../config/adminPermissions");
+const Application = require("../models/Application");
+
+router.use(auth);
+
+function merchantAllowed(req, merchantId) {
+  return ADMIN_ROLES.includes(req.user.role) || String(req.user.merchantId || "") === String(merchantId || "");
+}
+
+async function applicationOwner(req, res, next) {
+  try {
+    const application = await Application.findById(req.params.id);
+    if (!application) return res.status(404).json({ success: false, error: { code: "APPLICATION_NOT_FOUND", message: "Application not found." } });
+    if (!merchantAllowed(req, application.merchant)) return res.status(403).json({ success: false, error: { code: "APPLICATION_FORBIDDEN", message: "Application access denied." } });
+    next();
+  } catch { return res.status(400).json({ success: false, error: { code: "INVALID_APPLICATION", message: "Invalid application." } }); }
+}
 
 router.post(
 
@@ -20,6 +38,8 @@ router.post(
   ) => {
 
     try {
+
+      if (!merchantAllowed(req, req.body?.merchant)) return res.status(403).json({ success: false, error: { code: "APPLICATION_FORBIDDEN", message: "Application access denied." } });
 
       const application =
         await applicationService.createApplication(
@@ -75,6 +95,8 @@ router.get(
 
     try {
 
+      if (!merchantAllowed(req, req.params.merchantId)) return res.status(403).json({ success: false, error: { code: "APPLICATION_FORBIDDEN", message: "Application access denied." } });
+
       const applications =
         await applicationService.listMerchantApplications(
 
@@ -117,6 +139,8 @@ router.get(
 router.put(
 
   "/:id",
+
+  applicationOwner,
 
   async (
 
@@ -174,6 +198,8 @@ router.patch(
 
   "/:id/deactivate",
 
+  applicationOwner,
+
   async (
 
     req,
@@ -227,6 +253,8 @@ router.patch(
 router.delete(
 
   "/:id",
+
+  applicationOwner,
 
   async (
 

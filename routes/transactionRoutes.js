@@ -8,11 +8,13 @@ const Transaction =
   require("../models/Transaction");
 const auth = require("../middlewares/auth");
 const adminAuth = require("../middlewares/adminAuth");
+const permission = require("../middlewares/permission");
 
 router.get(
   "/",
   auth,
   adminAuth,
+  permission("transaction:view"),
   async (req, res) => {
     try {
       const transactions =

@@ -1,10 +1,20 @@
 const AuditLog = require("../models/AuditLog");
 
+const SENSITIVE = /password|token|secret|authorization|api[-_]?key/i;
+function sanitize(value) {
+  if (Array.isArray(value)) return value.map(sanitize);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !SENSITIVE.test(key)).map(([key, item]) => [key, sanitize(item)]));
+}
+
 async function createAuditLog({
   admin,
+  actorEmail = null,
   action,
-  targetUser = null,
-  transaction = null,
+  targetType = null,
+  targetId = null,
+  targetLabel = null,
+  severity = "low",
   metadata = {},
   req = null,
 }) {
@@ -12,9 +22,14 @@ async function createAuditLog({
     await AuditLog.create({
       admin,
       action,
-      targetUser,
-      transaction,
-      metadata,
+      actorEmail,
+      targetType,
+      targetId: targetId ? String(targetId) : null,
+      targetLabel,
+      severity,
+      metadata: sanitize(metadata),
+
+      requestId: req?.headers?.["x-request-id"] || null,
 
       ipAddress:
         req?.headers["x-forwarded-for"] ||

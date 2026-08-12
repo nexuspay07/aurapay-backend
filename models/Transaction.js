@@ -53,7 +53,7 @@ const transactionSchema = new mongoose.Schema(
 
     provider: {
       type: String,
-      enum: ["Stripe", "PayPal", "Internal", "Test"],
+      enum: ["Stripe", "PayPal", "Internal", "Test", "AuraPay Sandbox"],
       default: "Stripe",
       index: true,
     },
@@ -62,6 +62,32 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       enum: ["stripe", "paypal", "internal", "test"],
       default: "stripe",
+    },
+
+    environment: {
+      type: String,
+      enum: ["sandbox", "live"],
+      default: "sandbox",
+      index: true,
+    },
+
+    livemode: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    sandboxScenario: {
+      type: String,
+      enum: ["success", "declined", "insufficient_funds", "pending", "failed", null],
+      default: null,
+      index: true,
+    },
+
+    idempotencyKey: {
+      type: String,
+      default: "",
+      trim: true,
     },
 
     // ======================================

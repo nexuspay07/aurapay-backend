@@ -6,6 +6,8 @@ const crypto = require("crypto");
 
 const auth = require("../middlewares/auth");
 const adminAuth = require("../middlewares/adminAuth");
+const permission = require("../middlewares/permission");
+const createAuditLog = require("../utils/createAuditLog");
 const Merchant = require("../models/Merchant");
 const User =
   require("../models/User");
@@ -131,7 +133,7 @@ router.post(
 // GET ALL MERCHANTS
 // ======================================
 
-router.get("/", async (req, res) => {
+router.get("/", auth, adminAuth, permission("merchant:view"), async (req, res) => {
   try {
     const merchants =
       await Merchant.find().sort({
@@ -150,7 +152,7 @@ router.get("/", async (req, res) => {
 // GET SINGLE MERCHANT
 // ======================================
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", auth, adminAuth, permission("merchant:view"), async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return invalidId(res);
@@ -185,25 +187,19 @@ router.patch(
   "/:id/verify",
   auth,
   adminAuth,
+  permission("merchant:verify"),
   async (req, res) => {
     try {
       if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
         return invalidId(res);
       }
 
-      const merchant =
-        await Merchant.findByIdAndUpdate(
-          req.params.id,
-          {
-            verificationStatus:
-              "verified",
-          },
-          {
-            new: true,
-          }
-        );
-
-      res.json(merchant);
+      const merchant = await Merchant.findById(req.params.id);
+      if (!merchant) return res.status(404).json({ success: false, error: { code: "MERCHANT_NOT_FOUND", message: "Merchant not found." } });
+      if (merchant.verificationStatus === "verified") return res.status(409).json({ success: false, error: { code: "ALREADY_VERIFIED", message: "Merchant is already verified." } });
+      const before = merchant.verificationStatus; merchant.verificationStatus = "verified"; await merchant.save();
+      await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "merchant_verified", targetType: "merchant", targetId: merchant._id, targetLabel: merchant.businessName, severity: "high", metadata: { before, after: "verified" }, req });
+      res.json({ success: true, data: merchant });
     } catch (err) {
       res.status(500).json({
         error: "Failed to verify merchant",
@@ -220,25 +216,19 @@ router.patch(
   "/:id/reject",
   auth,
   adminAuth,
+  permission("merchant:verify"),
   async (req, res) => {
     try {
       if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
         return invalidId(res);
       }
 
-      const merchant =
-        await Merchant.findByIdAndUpdate(
-          req.params.id,
-          {
-            verificationStatus:
-              "rejected",
-          },
-          {
-            new: true,
-          }
-        );
-
-      res.json(merchant);
+      const merchant = await Merchant.findById(req.params.id);
+      if (!merchant) return res.status(404).json({ success: false, error: { code: "MERCHANT_NOT_FOUND", message: "Merchant not found." } });
+      if (merchant.verificationStatus === "rejected") return res.status(409).json({ success: false, error: { code: "ALREADY_REJECTED", message: "Merchant is already rejected." } });
+      const before = merchant.verificationStatus; merchant.verificationStatus = "rejected"; await merchant.save();
+      await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "merchant_rejected", targetType: "merchant", targetId: merchant._id, targetLabel: merchant.businessName, severity: "high", metadata: { before, after: "rejected", reason: req.body?.reason || null }, req });
+      res.json({ success: true, data: merchant });
     } catch (err) {
       res.status(500).json({
         error: "Failed to reject merchant",
@@ -255,25 +245,19 @@ router.patch(
   "/:id/risk",
   auth,
   adminAuth,
+  permission("merchant:risk"),
   async (req, res) => {
     try {
       if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
         return invalidId(res);
       }
 
-      const merchant =
-        await Merchant.findByIdAndUpdate(
-          req.params.id,
-          {
-            riskLevel:
-              req.body.riskLevel,
-          },
-          {
-            new: true,
-          }
-        );
-
-      res.json(merchant);
+      if (!["low", "medium", "high"].includes(req.body?.riskLevel)) return res.status(400).json({ success: false, error: { code: "INVALID_RISK_LEVEL", message: "Invalid risk level." } });
+      const merchant = await Merchant.findById(req.params.id);
+      if (!merchant) return res.status(404).json({ success: false, error: { code: "MERCHANT_NOT_FOUND", message: "Merchant not found." } });
+      const before = merchant.riskLevel; merchant.riskLevel = req.body.riskLevel; await merchant.save();
+      await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "merchant_risk_changed", targetType: "merchant", targetId: merchant._id, targetLabel: merchant.businessName, severity: "high", metadata: { before, after: merchant.riskLevel }, req });
+      res.json({ success: true, data: merchant });
     } catch (err) {
       res.status(500).json({
         error: "Failed to update merchant risk",

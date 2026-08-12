@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 
 const auth = require("../middlewares/auth");
 const adminAuth = require("../middlewares/adminAuth");
+const permission = require("../middlewares/permission");
 const apiKeyService =
   require("../services/apiKeyService");
 
@@ -10,6 +11,7 @@ const router = express.Router();
 
 router.use(auth);
 router.use(adminAuth);
+router.use(permission("apikey:manage"));
 
 function invalidId(res) {
   return res.status(400).json({

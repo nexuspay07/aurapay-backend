@@ -11,6 +11,8 @@ const auditLogSchema =
         ref: "User",
       },
 
+      actorEmail: { type: String, default: null },
+
       action: {
         type: String,
         required: true,
@@ -25,6 +27,10 @@ const auditLogSchema =
         type: String,
         default: null,
       },
+
+      targetLabel: { type: String, default: null },
+
+      requestId: { type: String, default: null },
 
       metadata: {
         type: Object,

@@ -7,9 +7,8 @@ const IdempotencyKey = require("../../../models/IdempotencyKey");
 const Transaction = require("../../../models/Transaction");
 const CheckoutSession = require("../../../models/CheckoutSession");
 const Settlement = require("../../../models/Settlement");
-const paymentProcessingService = require("../../../services/paymentProcessingService");
 const checkoutService = require("../../../services/checkoutService");
-const settlementService = require("../../../services/settlementService");
+const sandboxPaymentSimulationService = require("../../../services/sandboxPaymentSimulationService");
 
 const {
   failure,
@@ -146,9 +145,19 @@ router.get("/account", requireApiPermission("account:read"), (req, res) => {
   });
 });
 
+router.get("/", (req, res) => {
+  return sendSuccess(res, {
+    name: "AuraPay API v1",
+    environment: "sandbox",
+    livemode: false,
+    message: "Sandbox Beta API. No real funds are processed.",
+    paymentScenarios: sandboxPaymentSimulationService.getScenarios(),
+  });
+});
+
 router.post("/payments", requireApiPermission("payments:create"), async (req, res) => {
   try {
-    const { amount, currency, customerEmail, provider = "Test" } = req.body;
+    const { amount, currency, customerEmail, description = "", scenario = "success" } = req.body;
 
     if (!validAmount(amount)) {
       return sendFailure(res, 400, "invalid_request", "Amount must be greater than zero.");
@@ -163,31 +172,26 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
     }
 
     return await withIdempotency(req, res, "POST /api/v1/payments", async () => {
-      const paymentIntentId = `test_pi_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-      const transaction = await paymentProcessingService.processSuccessfulPayment({
+      const result = await sandboxPaymentSimulationService.simulatePayment({
         merchant: req.merchant._id,
-        checkoutSession: null,
-        paymentIntentId,
         amount: Number(amount),
-        currency: String(currency).toLowerCase(),
+        currency: String(currency).toUpperCase(),
         customerEmail,
-        provider,
-      });
-
-      await settlementService.createSettlement({
-        merchant: req.merchant._id,
-        transaction: transaction._id,
-        amount: transaction.amount,
-        currency: transaction.currency,
-        merchantNet: transaction.merchantNet || transaction.amount,
+        description,
+        scenario,
+        idempotencyKey: req.headers["idempotency-key"],
       });
 
       return {
         statusCode: 201,
         body: {
           success: true,
-          data: normalizeTransaction(transaction),
-          meta: {},
+          data: normalizeTransaction(result.transaction),
+          meta: {
+            scenario: result.scenario,
+            outcome: result.outcome.code,
+            settlementId: result.settlement?._id || null,
+          },
         },
       };
     });
@@ -250,75 +254,39 @@ router.post("/refunds", requireApiPermission("refunds:create"), async (req, res)
     }
 
     return await withIdempotency(req, res, "POST /api/v1/refunds", async () => {
-      const transaction = await Transaction.findOne({
-        _id: transactionId,
-        merchant: req.merchant._id,
-      });
+      try {
+        const result = await sandboxPaymentSimulationService.refund({
+          merchant: req.merchant._id,
+          transactionId,
+          amount: amount ? Number(amount) : undefined,
+          reason,
+        });
 
-      if (!transaction) {
         return {
-          statusCode: 404,
+          statusCode: 201,
+          body: {
+            success: true,
+            data: normalizeTransaction(result.transaction),
+            meta: {
+              refundAmount: result.refundAmount,
+              totalRefunded: result.totalRefunded,
+              settlementId: result.settlement?._id || null,
+            },
+          },
+        };
+      } catch (err) {
+        const statusCode = err.statusCode || 500;
+        return {
+          statusCode,
           body: {
             success: false,
             error: {
-              code: "not_found",
-              message: "Transaction not found.",
+              code: statusCode === 404 ? "not_found" : "invalid_request",
+              message: err.message,
             },
           },
         };
       }
-
-      if (transaction.status !== "completed") {
-        return {
-          statusCode: 400,
-          body: {
-            success: false,
-            error: {
-              code: "invalid_request",
-              message: "Only completed transactions can be refunded.",
-            },
-          },
-        };
-      }
-
-      const refundAmount = Number(amount || transaction.amount);
-      if (refundAmount > Number(transaction.amount)) {
-        return {
-          statusCode: 400,
-          body: {
-            success: false,
-            error: {
-              code: "invalid_request",
-              message: "Refund amount cannot exceed transaction amount.",
-            },
-          },
-        };
-      }
-
-      transaction.status = "refunded";
-      transaction.success = false;
-      transaction.refundedAt = new Date();
-      transaction.refund = {
-        providerRefundId: `test_re_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-        providerRefundStatus: "succeeded",
-        refundAmount,
-        refundCurrency: transaction.currency,
-        refundReason: reason,
-        refundRequestedAt: new Date(),
-        refundCompletedAt: new Date(),
-      };
-
-      await transaction.save();
-      await settlementService.applyRefund(transaction._id, refundAmount).catch(() => null);
-
-      return {
-        statusCode: 201,
-        body: {
-          success: true,
-          data: normalizeTransaction(transaction),
-          meta: {},
-        },
-      };
     });
   } catch (err) {
     return sendFailure(res, 500, "internal_error", "Failed to create refund.");
@@ -327,15 +295,22 @@ router.post("/refunds", requireApiPermission("refunds:create"), async (req, res)
 
 router.get("/refunds", requireApiPermission("refunds:read"), async (req, res) => {
   try {
-    const result = await listQuery(
-      Transaction,
-      req,
-      { merchant: req.merchant._id, status: "refunded" },
-      normalizeTransaction,
-      ["refunded"]
-    );
+    const { page, limit, skip } = parsePagination(req.query);
+    const filter = {
+      merchant: req.merchant._id,
+      "refund.refundAmount": { $gt: 0 },
+    };
 
-    return sendSuccess(res, result.data, result.meta);
+    const [total, records] = await Promise.all([
+      Transaction.countDocuments(filter),
+      Transaction.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(limit),
+    ]);
+
+    return sendSuccess(
+      res,
+      records.map(normalizeTransaction),
+      paginationMeta(page, limit, total)
+    );
   } catch (err) {
     return sendFailure(res, 500, "internal_error", "Failed to load refunds.");
   }
@@ -350,7 +325,7 @@ router.get("/refunds/:id", requireApiPermission("refunds:read"), async (req, res
     const transaction = await Transaction.findOne({
       _id: req.params.id,
       merchant: req.merchant._id,
-      status: "refunded",
+      "refund.refundAmount": { $gt: 0 },
     });
 
     if (!transaction) {
@@ -365,7 +340,7 @@ router.get("/refunds/:id", requireApiPermission("refunds:read"), async (req, res
 
 router.post("/checkouts", requireApiPermission("checkouts:create"), async (req, res) => {
   try {
-    const { amount, currency, customerEmail } = req.body;
+    const { amount, currency, customerEmail, description = "" } = req.body;
 
     if (!validAmount(amount)) {
       return sendFailure(res, 400, "invalid_request", "Amount must be greater than zero.");
@@ -384,6 +359,7 @@ router.post("/checkouts", requireApiPermission("checkouts:create"), async (req, 
         amount: Number(amount),
         currency: String(currency).toUpperCase(),
         customerEmail,
+        description,
       });
 
       return {

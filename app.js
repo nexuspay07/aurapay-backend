@@ -90,7 +90,7 @@ app.use((err, req, res, next) => {
   ) {
     return res.status(400).json({
       success: false,
-      message: "Malformed JSON.",
+      error: { code: "MALFORMED_JSON", message: "Malformed JSON." },
     });
   }
 
@@ -134,7 +134,7 @@ app.use((err, req, res, next) => {
 
   return res.status(500).json({
     success: false,
-    message: "Internal server error.",
+    error: { code: "INTERNAL_ERROR", message: "Internal server error." },
   });
 });
 // ======================================

@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/User");
+const { ADMIN_ROLES } = require("../config/adminPermissions");
 
 module.exports = async function auth(req, res, next) {
   try {
@@ -18,9 +19,13 @@ module.exports = async function auth(req, res, next) {
       return res.status(401).json({ error: "Invalid token" });
     }
 
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.id).select("+adminSecurityVersion");
     if (!user) {
       return res.status(401).json({ error: "User not found" });
+    }
+
+    if (ADMIN_ROLES.includes(user.role) && Number(decoded.adminSecurityVersion || 0) !== Number(user.adminSecurityVersion || 0)) {
+      return res.status(401).json({ error: "Invalid token" });
     }
 
     // 🔓 auto-unfreeze if freeze expired
@@ -31,6 +36,7 @@ module.exports = async function auth(req, res, next) {
     }
 
     req.user = user;
+    req.auth = decoded;
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid token" });

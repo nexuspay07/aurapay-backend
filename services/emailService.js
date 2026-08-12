@@ -7,6 +7,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // ======================================
 
 async function sendEmail({ to, subject, html }) {
+  if (process.env.ADMIN_EMAIL_DELIVERY_DISABLED === "true") throw new Error("Email delivery disabled");
   return resend.emails.send({
     from: process.env.EMAIL_FROM,
     to,
@@ -127,8 +128,20 @@ async function sendPasswordResetEmail(user, token) {
   });
 }
 
+async function sendAdminInvitationEmail(invitation, token) {
+  const link = `${process.env.FRONTEND_URL}/admin-invitation/${token}`;
+  return sendEmail({ to: invitation.email, subject: "Your AuraPay Admin invitation", html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto"><h2>AuraPay Admin invitation</h2><p>You have been invited to the AuraPay Sandbox administration workspace as <strong>${invitation.role}</strong>.</p><p><a href="${link}" style="background:#2457d6;color:white;padding:14px 24px;text-decoration:none;border-radius:8px;display:inline-block">Activate admin access</a></p><p>This single-use invitation expires in 24 hours.</p><small>If you did not expect this invitation, you can ignore it.</small></div>` });
+}
+
+async function sendAdminPasswordResetEmail(user, token) {
+  const link = `${process.env.FRONTEND_URL}/admin-reset-password/${token}`;
+  return sendEmail({ to: user.email, subject: "Reset your AuraPay Admin password", html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto"><h2>Reset AuraPay Admin password</h2><p><a href="${link}" style="background:#111827;color:white;padding:14px 24px;text-decoration:none;border-radius:8px;display:inline-block">Reset admin password</a></p><p>This single-use link expires in one hour.</p><small>If you did not request this reset, you can ignore it.</small></div>` });
+}
+
 module.exports = {
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
+  sendAdminInvitationEmail,
+  sendAdminPasswordResetEmail,
 };

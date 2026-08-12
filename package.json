@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/api-v1.test.js",
+    "test": "node --test tests/*.test.js",
     "test:api": "node --test tests/api-v1.test.js",
     "test:smoke": "node tests/api-v1-smoke.js"
   },

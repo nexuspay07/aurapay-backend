@@ -12,6 +12,7 @@ const ApiKey = require("../models/ApiKey");
 const ApiLog = require("../models/ApiLog");
 const IdempotencyKey = require("../models/IdempotencyKey");
 const Merchant = require("../models/Merchant");
+const MerchantWebhook = require("../models/MerchantWebhook");
 const Settlement = require("../models/Settlement");
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
@@ -33,6 +34,7 @@ const createdIds = {
   merchants: [],
   users: [],
   transactions: [],
+  webhooks: [],
 };
 
 test.before(async () => {
@@ -134,12 +136,28 @@ test.before(async () => {
   });
   otherSecret = other.secretKey;
   createdIds.apiKeys.push(other.apiKey._id);
+
+  const webhook = await MerchantWebhook.create({
+    merchant: merchant._id,
+    url: "http://127.0.0.1:1/aurapay-api-test",
+    secret: "whsec_api_test",
+    eventTypes: [
+      "payment.created",
+      "payment.completed",
+      "payment.failed",
+      "payment.refunded",
+      "settlement.created",
+    ],
+    active: true,
+  });
+  createdIds.webhooks.push(webhook._id);
 });
 
 test.after(async () => {
   await ApiLog.deleteMany({ merchant: { $in: createdIds.merchants } });
   await IdempotencyKey.deleteMany({ merchant: { $in: createdIds.merchants } });
   await WebhookDelivery.deleteMany({ merchant: { $in: createdIds.merchants } });
+  await MerchantWebhook.deleteMany({ merchant: { $in: createdIds.merchants } });
   await Settlement.deleteMany({ merchant: { $in: createdIds.merchants } });
   await Transaction.deleteMany({ merchant: { $in: createdIds.merchants } });
   await ApiKey.deleteMany({ merchant: { $in: createdIds.merchants } });
@@ -204,7 +222,145 @@ test("successful API request creates payment and propagates request ID", async (
   assert.equal(res.status, 201);
   assert.equal(res.body.success, true);
   assert.equal(res.headers.get("x-request-id"), "req_test_success");
+  assert.equal(res.body.data.environment, "sandbox");
+  assert.equal(res.body.data.livemode, false);
+  assert.equal(res.body.data.sandboxScenario, "success");
+  assert.equal(res.body.data.status, "completed");
   createdIds.transactions.push(res.body.data.id);
+});
+
+test("successful sandbox payment creates settlement and webhook delivery records", async () => {
+  const res = await request("POST", "/api/v1/payments", {
+    token: fullSecret,
+    idempotencyKey: "payment-lifecycle",
+    body: {
+      amount: 42,
+      currency: "USD",
+      customerEmail: "lifecycle@example.com",
+      scenario: "success",
+    },
+  });
+
+  assert.equal(res.status, 201);
+  createdIds.transactions.push(res.body.data.id);
+
+  const settlement = await Settlement.findOne({
+    transaction: res.body.data.id,
+    merchant: merchant._id,
+  });
+  assert.ok(settlement);
+  assert.equal(settlement.environment, "sandbox");
+  assert.equal(settlement.status, "pending");
+  assert.equal(settlement.amount, 42);
+  assert.ok(settlement.netAmount < settlement.amount);
+
+  await wait(250);
+  const deliveries = await WebhookDelivery.find({
+    merchant: merchant._id,
+    eventType: { $in: ["payment.completed", "settlement.created"] },
+  });
+  assert.ok(deliveries.length >= 2);
+  assert.ok(deliveries.every((delivery) => delivery.environment === "sandbox"));
+});
+
+test("sandbox declined payment produces failed transaction without settlement", async () => {
+  const res = await request("POST", "/api/v1/payments", {
+    token: fullSecret,
+    idempotencyKey: "payment-declined",
+    body: {
+      amount: 18,
+      currency: "USD",
+      scenario: "declined",
+    },
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.body.data.status, "failed");
+  assert.equal(res.body.data.sandboxScenario, "declined");
+  createdIds.transactions.push(res.body.data.id);
+
+  const settlement = await Settlement.findOne({
+    transaction: res.body.data.id,
+  });
+  assert.equal(settlement, null);
+});
+
+test("sandbox insufficient funds and pending scenarios are deterministic", async () => {
+  const insufficient = await request("POST", "/api/v1/payments", {
+    token: fullSecret,
+    idempotencyKey: "payment-insufficient",
+    body: {
+      amount: 19,
+      currency: "USD",
+      scenario: "insufficient_funds",
+    },
+  });
+  const pending = await request("POST", "/api/v1/payments", {
+    token: fullSecret,
+    idempotencyKey: "payment-pending",
+    body: {
+      amount: 20,
+      currency: "USD",
+      scenario: "pending",
+    },
+  });
+
+  assert.equal(insufficient.status, 201);
+  assert.equal(insufficient.body.data.status, "failed");
+  assert.equal(insufficient.body.data.sandboxScenario, "insufficient_funds");
+  assert.equal(pending.status, 201);
+  assert.equal(pending.body.data.status, "pending");
+  assert.equal(pending.body.data.sandboxScenario, "pending");
+  createdIds.transactions.push(insufficient.body.data.id, pending.body.data.id);
+});
+
+test("sandbox partial and full refunds update remaining refundable amount", async () => {
+  const payment = await request("POST", "/api/v1/payments", {
+    token: fullSecret,
+    idempotencyKey: "payment-refundable",
+    body: {
+      amount: 30,
+      currency: "USD",
+      scenario: "success",
+    },
+  });
+  assert.equal(payment.status, 201);
+  createdIds.transactions.push(payment.body.data.id);
+
+  const partial = await request("POST", "/api/v1/refunds", {
+    token: fullSecret,
+    idempotencyKey: "refund-partial",
+    body: {
+      transactionId: payment.body.data.id,
+      amount: 10,
+      reason: "requested_by_customer",
+    },
+  });
+  assert.equal(partial.status, 201);
+  assert.equal(partial.body.data.status, "completed");
+  assert.equal(partial.body.data.refund.refundAmount, 10);
+
+  const overRefund = await request("POST", "/api/v1/refunds", {
+    token: fullSecret,
+    idempotencyKey: "refund-over",
+    body: {
+      transactionId: payment.body.data.id,
+      amount: 25,
+    },
+  });
+  assert.equal(overRefund.status, 400);
+
+  const full = await request("POST", "/api/v1/refunds", {
+    token: fullSecret,
+    idempotencyKey: "refund-full",
+    body: {
+      transactionId: payment.body.data.id,
+      amount: 20,
+    },
+  });
+  assert.equal(full.status, 201);
+  assert.equal(full.body.data.status, "refunded");
+  assert.equal(full.body.data.refund.refundAmount, 30);
 });
 
 test("merchant isolation prevents cross-merchant access", async () => {

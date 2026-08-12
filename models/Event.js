@@ -46,6 +46,26 @@ const eventSchema = new mongoose.Schema(
 
     },
 
+    environment: {
+
+      type: String,
+
+      enum: ["sandbox", "live"],
+
+      default: "sandbox",
+
+      index: true,
+
+    },
+
+    livemode: {
+
+      type: Boolean,
+
+      default: false,
+
+    },
+
     delivered: {
 
       type: Boolean,

@@ -1,5 +1,7 @@
 const checkoutService =
   require("../services/checkoutService");
+const sandboxPaymentSimulationService =
+  require("../services/sandboxPaymentSimulationService");
 const mongoose = require("mongoose");
 
 // ======================================
@@ -162,6 +164,45 @@ exports.markPaid =
         success: false,
         error:
           "Failed to update checkout session.",
+      });
+
+    }
+
+  };
+
+// ======================================
+// SIMULATE SANDBOX CHECKOUT PAYMENT
+// ======================================
+
+exports.simulatePayment =
+  async (req, res) => {
+
+    try {
+
+      const result =
+        await sandboxPaymentSimulationService.simulateCheckoutPayment(
+          req.params.sessionId,
+          req.body?.scenario || "success"
+        );
+
+      return res.json({
+        success: true,
+        data: {
+          checkout: result.checkoutSession,
+          transaction: result.transaction,
+          settlement: result.settlement,
+          scenario: result.scenario,
+          outcome: result.outcome,
+          replay: result.replay,
+        },
+      });
+
+    } catch (err) {
+
+      return res.status(err.statusCode || 500).json({
+        success: false,
+        error:
+          err.message || "Failed to simulate checkout payment.",
       });
 
     }

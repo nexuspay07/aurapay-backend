@@ -59,6 +59,11 @@ router.post(
   checkoutOperationsController.createPaymentIntent
 );
 
+router.post(
+  "/sessions/by-code/:sessionId/simulate",
+  checkoutOperationsController.simulatePayment
+);
+
 // ======================================
 // MARK SESSION AS PAID
 // (USED BY WEBHOOK / INTERNAL)

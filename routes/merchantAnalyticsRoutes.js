@@ -25,25 +25,30 @@ router.get(
       const merchantId =
   req.merchant._id;
 
+      const sandboxFilter = {
+        merchant: merchantId,
+        environment: {
+          $ne: "live",
+        },
+      };
+
       // ======================================
       // TRANSACTION STATS
       // ======================================
 
       const totalTransactions =
-        await Transaction.countDocuments({
-          merchant: merchantId,
-        });
+        await Transaction.countDocuments(sandboxFilter);
 
       const successfulPayments =
         await Transaction.countDocuments({
-          merchant: merchantId,
+          ...sandboxFilter,
           success: true,
         });
 
       const failedPayments =
         await Transaction.countDocuments({
-          merchant: merchantId,
-          success: false,
+          ...sandboxFilter,
+          status: "failed",
         });
 
       const revenueAggregation =
@@ -51,6 +56,9 @@ router.get(
           {
             $match: {
               merchant: merchantId,
+              environment: {
+                $ne: "live",
+              },
               success: true,
             },
           },
@@ -74,23 +82,35 @@ router.get(
       const totalCheckouts =
         await CheckoutSession.countDocuments({
           merchant: merchantId,
+          environment: {
+            $ne: "live",
+          },
         });
 
       const paidCheckouts =
         await CheckoutSession.countDocuments({
           merchant: merchantId,
+          environment: {
+            $ne: "live",
+          },
           status: "paid",
         });
 
       const pendingCheckouts =
         await CheckoutSession.countDocuments({
           merchant: merchantId,
+          environment: {
+            $ne: "live",
+          },
           status: "created",
         });
 
       const failedCheckouts =
         await CheckoutSession.countDocuments({
           merchant: merchantId,
+          environment: {
+            $ne: "live",
+          },
           status: "failed",
         });
 
@@ -101,12 +121,18 @@ router.get(
       const pendingSettlements =
         await Settlement.countDocuments({
           merchant: merchantId,
+          environment: {
+            $ne: "live",
+          },
           status: "pending",
         });
 
       const completedSettlements =
         await Settlement.countDocuments({
           merchant: merchantId,
+          environment: {
+            $ne: "live",
+          },
           status: "completed",
         });
 
@@ -129,7 +155,7 @@ router.get(
 
       const recentTransactions =
         await Transaction.find({
-          merchant: merchantId,
+          ...sandboxFilter,
         })
           .sort({
             createdAt: -1,
@@ -143,6 +169,9 @@ router.get(
       const recentCheckouts =
         await CheckoutSession.find({
           merchant: merchantId,
+          environment: {
+            $ne: "live",
+          },
         })
           .sort({
             createdAt: -1,
@@ -156,6 +185,9 @@ router.get(
       const recentSettlements =
         await Settlement.find({
           merchant: merchantId,
+          environment: {
+            $ne: "live",
+          },
         })
           .sort({
             createdAt: -1,
@@ -171,6 +203,9 @@ const revenueHistory =
     {
       $match: {
         merchant: merchantId,
+        environment: {
+          $ne: "live",
+        },
         success: true,
       },
     },
@@ -226,6 +261,8 @@ monthlyRevenue: totalRevenue,
         recentTransactions,
         recentCheckouts,
         recentSettlements,
+        environment: "sandbox",
+        livemode: false,
       });
 
     } catch (err) {
@@ -246,6 +283,9 @@ router.get(
       const transactions =
         await Transaction.find({
           merchant: req.merchant._id,
+          environment: {
+            $ne: "live",
+          },
         })
           .sort({
             createdAt: -1,
@@ -269,6 +309,9 @@ router.get(
       const settlements =
         await Settlement.find({
           merchant: req.merchant._id,
+          environment: {
+            $ne: "live",
+          },
         })
           .sort({
             createdAt: -1,

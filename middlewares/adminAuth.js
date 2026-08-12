@@ -1,3 +1,5 @@
+const { ADMIN_ROLES } = require("../config/adminPermissions");
+
 function adminAuth(req, res, next) {
   try {
     if (!req.user) {
@@ -8,15 +10,7 @@ function adminAuth(req, res, next) {
 
     const role = req.user.role || "user";
 
-    const adminRoles = [
-      "super_admin",
-      "finance_admin",
-      "risk_admin",
-      "support_admin",
-      "auditor",
-    ];
-
-    if (!adminRoles.includes(role)) {
+    if (!ADMIN_ROLES.includes(role) || req.user.adminDisabled === true || req.user.frozen === true) {
       return res.status(403).json({
         error: "Admin access required",
       });

@@ -9,17 +9,21 @@ const Transaction = require("../models/Transaction");
 const apiKeyService = require("../services/apiKeyService");
 
 async function main() {
+  const runId = `smoke-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let merchant = null;
+  let server = null;
   const mongoUri = process.env.MONGO_URI_TEST || process.env.MONGO_URI;
 
   if (!mongoUri) {
     throw new Error("MONGO_URI_TEST or MONGO_URI is required for smoke test");
   }
 
+  try {
   await mongoose.connect(mongoUri);
 
-  const merchant = await Merchant.create({
-    businessName: "Smoke Merchant",
-    legalName: "Smoke Merchant LLC",
+  merchant = await Merchant.create({
+    businessName: `Smoke Merchant ${runId}`,
+    legalName: `Smoke Merchant ${runId} LLC`,
     businessType: "corporation",
     contactEmail: `smoke-${Date.now()}@aurapay.test`,
     country: "US",
@@ -34,7 +38,7 @@ async function main() {
     permissions: ["account:read"],
   });
 
-  const server = http.createServer(app);
+  server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
@@ -60,17 +64,20 @@ async function main() {
     throw new Error("Smoke request did not create an API log");
   }
 
-  await new Promise((resolve) => server.close(resolve));
-  await ApiLog.deleteMany({ merchant: merchant._id });
-  await Transaction.deleteMany({ merchant: merchant._id });
-  await ApiKey.deleteMany({ merchant: merchant._id });
-  await Merchant.findByIdAndDelete(merchant._id);
-  await mongoose.disconnect();
-
   console.log("SMOKE_OK", {
     account: body.data.id,
     apiLog: log._id.toString(),
   });
+  } finally {
+    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    if (merchant?._id) {
+      await ApiLog.deleteMany({ merchant: merchant._id }).catch(() => {});
+      await Transaction.deleteMany({ merchant: merchant._id }).catch(() => {});
+      await ApiKey.deleteMany({ merchant: merchant._id }).catch(() => {});
+      await Merchant.deleteOne({ _id: merchant._id, businessName: `Smoke Merchant ${runId}` }).catch(() => {});
+    }
+    await mongoose.disconnect().catch(() => {});
+  }
 }
 
 main().catch(async (error) => {

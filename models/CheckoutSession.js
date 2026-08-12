@@ -30,6 +30,25 @@ const checkoutSessionSchema =
         default: "",
       },
 
+      description: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      environment: {
+        type: String,
+        enum: ["sandbox", "live"],
+        default: "sandbox",
+        index: true,
+      },
+
+      livemode: {
+        type: Boolean,
+        default: false,
+        index: true,
+      },
+
       stripePaymentIntentId: {
   type: String,
   default: "",

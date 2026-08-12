@@ -52,6 +52,19 @@ const settlementSchema =
         default: 1,
       },
 
+      environment: {
+        type: String,
+        enum: ["sandbox", "live"],
+        default: "sandbox",
+        index: true,
+      },
+
+      livemode: {
+        type: Boolean,
+        default: false,
+        index: true,
+      },
+
       payout: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Payout",

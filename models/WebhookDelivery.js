@@ -58,6 +58,13 @@ const webhookDeliverySchema = new mongoose.Schema(
       type: Object,
       default: {},
     },
+
+    environment: {
+      type: String,
+      enum: ["sandbox", "live"],
+      default: "sandbox",
+      index: true,
+    },
   },
   {
     timestamps: true,

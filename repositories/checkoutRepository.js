@@ -37,7 +37,7 @@ class CheckoutRepository {
 
     return await CheckoutSession.findOne({
       sessionId,
-    });
+    }).populate("merchant", "businessName legalName");
 
   }
 

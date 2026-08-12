@@ -33,6 +33,19 @@ const userSchema = new mongoose.Schema(
       default: [],
     },
 
+    adminDisabled: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    adminSecurityVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
+      select: false,
+    },
+
     merchantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Merchant",

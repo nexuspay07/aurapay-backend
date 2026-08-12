@@ -5,6 +5,8 @@ const checkoutRepository =
 
 const stripeService =
   require("./stripeService");
+const sandboxPaymentSimulationService =
+  require("./sandboxPaymentSimulationService");
 
 class CheckoutService {
 
@@ -17,32 +19,10 @@ class CheckoutService {
     data
   ) {
 
-    const sessionId =
-      "CHK_" +
-      crypto
-        .randomBytes(8)
-        .toString("hex")
-        .toUpperCase();
-
-    return await checkoutRepository.create({
-
-      merchant: merchantId,
-
-      sessionId,
-
-      amount: data.amount,
-
-      currency:
-        data.currency || "USD",
-
-      customerEmail:
-        data.customerEmail,
-
-      status: "created",
-
-      provider: "AuraPay",
-
-    });
+    return await sandboxPaymentSimulationService.createCheckout(
+      merchantId,
+      data
+    );
 
   }
 
@@ -93,31 +73,22 @@ class CheckoutService {
 
     }
 
-    const paymentIntent =
-      await stripeService.createPaymentIntent(
-
-        session.amount,
-
-        session.currency
-
-      );
+    const paymentIntentId =
+      `pay_test_pending_${crypto.randomBytes(8).toString("hex")}`;
 
     await checkoutRepository.updatePaymentIntent(
-
       id,
-
-      paymentIntent.id
-
+      paymentIntentId
     );
 
     return {
-
-      clientSecret:
-        paymentIntent.client_secret,
-
-      paymentIntentId:
-        paymentIntent.id,
-
+      clientSecret: "",
+      paymentIntentId,
+      provider: "AuraPay Sandbox",
+      environment: "sandbox",
+      livemode: false,
+      scenarios: sandboxPaymentSimulationService.getScenarios(),
+      message: "Sandbox checkout initialized. No real funds will be charged.",
     };
 
   }
