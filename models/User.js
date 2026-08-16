@@ -46,6 +46,13 @@ const userSchema = new mongoose.Schema(
       select: false,
     },
 
+    merchantSecurityVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
+      select: false,
+    },
+
     merchantId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Merchant",

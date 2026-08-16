@@ -49,7 +49,7 @@ class MerchantWebhookRepository {
 
       active: true,
 
-    });
+    }).select("+secret");
 
   }
 

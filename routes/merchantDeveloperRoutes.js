@@ -1,9 +1,9 @@
 const crypto = require("crypto");
 const express = require("express");
 const mongoose = require("mongoose");
-const axios = require("axios");
 
 const apiKeyService = require("../services/apiKeyService");
+const merchantWebhookService = require("../services/merchantWebhookService");
 const merchantAuth = require("../middlewares/merchantAuth");
 const Application = require("../models/Application");
 const ApiKey = require("../models/ApiKey");
@@ -43,6 +43,17 @@ function invalidId(res) {
   return res.status(400).json({
     success: false,
     message: "Invalid ID.",
+  });
+}
+
+function invalidWebhookUrl(res) {
+  return res.status(400).json({
+    success: false,
+    error: {
+      code: "INVALID_WEBHOOK_URL",
+      message: "Webhook URL must be a publicly reachable HTTPS endpoint.",
+    },
+    message: "Webhook URL must be a publicly reachable HTTPS endpoint.",
   });
 }
 
@@ -433,6 +444,12 @@ router.post("/webhooks", async (req, res) => {
       });
     }
 
+    try {
+      await merchantWebhookService.validateDestination(String(url).trim());
+    } catch {
+      return invalidWebhookUrl(res);
+    }
+
     const secret = `whsec_${crypto.randomBytes(32).toString("hex")}`;
     const selectedEvents = Array.isArray(eventTypes)
       ? eventTypes.filter((eventType) => WEBHOOK_EVENTS.includes(eventType))
@@ -490,6 +507,21 @@ router.put("/webhooks/:id", async (req, res) => {
         : [];
     }
 
+    if (Object.prototype.hasOwnProperty.call(updates, "url")) {
+      if (!updates.url || !String(updates.url).trim()) {
+        return invalidWebhookUrl(res);
+      }
+
+      try {
+        await merchantWebhookService.validateDestination(
+          String(updates.url).trim()
+        );
+      } catch {
+        return invalidWebhookUrl(res);
+      }
+      updates.url = String(updates.url).trim();
+    }
+
     const webhook = await MerchantWebhook.findOneAndUpdate(
       {
         _id: req.params.id,
@@ -509,7 +541,16 @@ router.put("/webhooks/:id", async (req, res) => {
     return res.json({
       success: true,
       message: "Webhook updated.",
-      data: webhook,
+      data: {
+        _id: webhook._id,
+        url: webhook.url,
+        eventTypes: webhook.eventTypes,
+        active: webhook.active,
+        lastDeliveryAt: webhook.lastDeliveryAt,
+        lastDeliveryStatus: webhook.lastDeliveryStatus,
+        createdAt: webhook.createdAt,
+        updatedAt: webhook.updatedAt,
+      },
     });
   } catch (err) {
     return res.status(500).json({
@@ -567,7 +608,7 @@ router.post("/webhooks/:id/test", async (req, res) => {
     const webhook = await MerchantWebhook.findOne({
       _id: req.params.id,
       merchant: req.merchant._id,
-    });
+    }).select("+secret");
 
     if (!webhook) {
       return res.status(404).json({
@@ -582,57 +623,37 @@ router.post("/webhooks/:id/test", async (req, res) => {
       object: "event",
       created: new Date().toISOString(),
     };
-    const payloadString = JSON.stringify(payload);
-    const signature = crypto
-      .createHmac("sha256", webhook.secret)
-      .update(payloadString)
-      .digest("hex");
     const startedAt = Date.now();
-
-    let status = "delivered";
-    let statusCode = 200;
-    let errorMessage = "";
+    let result;
 
     if (!webhook.active) {
-      status = "failed";
-      statusCode = null;
-      errorMessage = "Webhook is disabled.";
+      result = {
+        status: "failed",
+        statusCode: null,
+        latencyMs: Date.now() - startedAt,
+        errorCode: "webhook_disabled",
+        errorMessage: "Webhook is disabled.",
+        deliveredAt: null,
+      };
     } else {
-      try {
-        const response = await axios.post(webhook.url, payload, {
-          headers: {
-            "Content-Type": "application/json",
-            "X-AuraPay-Signature": signature,
-            "X-AuraPay-Event": "webhook.test",
-          },
-          timeout: 10000,
-          validateStatus: () => true,
-        });
-
-        statusCode = response.status;
-        status = response.status >= 200 && response.status < 300
-          ? "delivered"
-          : "failed";
-        errorMessage = status === "failed"
-          ? "Webhook endpoint returned a non-2xx response."
-          : "";
-      } catch (err) {
-        status = "failed";
-        statusCode = null;
-        errorMessage = "Webhook endpoint could not be reached.";
-      }
+      result = await merchantWebhookService.attemptDelivery(
+        webhook,
+        payload,
+        "webhook.test"
+      );
     }
 
     const delivery = await WebhookDelivery.create({
       merchant: req.merchant._id,
       webhook: webhook._id,
       eventType: "webhook.test",
-      status,
-      statusCode,
-      latencyMs: Date.now() - startedAt,
-      errorMessage,
+      status: result.status,
+      statusCode: result.statusCode,
+      latencyMs: result.latencyMs,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage,
       attempts: 1,
-      deliveredAt: status === "delivered" ? new Date() : null,
+      deliveredAt: result.deliveredAt,
       payloadPreview: payload,
     });
 
@@ -739,7 +760,7 @@ router.post("/webhook-deliveries/:id/retry", async (req, res) => {
     const webhook = await MerchantWebhook.findOne({
       _id: delivery.webhook,
       merchant: req.merchant._id,
-    });
+    }).select("+secret");
 
     if (!webhook) {
       return res.status(404).json({
@@ -749,11 +770,6 @@ router.post("/webhook-deliveries/:id/retry", async (req, res) => {
     }
 
     const payload = delivery.payloadPreview || {};
-    const payloadString = JSON.stringify(payload);
-    const signature = crypto
-      .createHmac("sha256", webhook.secret)
-      .update(payloadString)
-      .digest("hex");
     const startedAt = Date.now();
 
     delivery.attempts += 1;
@@ -761,37 +777,21 @@ router.post("/webhook-deliveries/:id/retry", async (req, res) => {
     if (!webhook.active) {
       delivery.status = "failed";
       delivery.statusCode = null;
+      delivery.errorCode = "webhook_disabled";
       delivery.errorMessage = "Webhook is disabled.";
       delivery.latencyMs = Date.now() - startedAt;
     } else {
-      try {
-        const response = await axios.post(webhook.url, payload, {
-          headers: {
-            "Content-Type": "application/json",
-            "X-AuraPay-Signature": signature,
-            "X-AuraPay-Event": delivery.eventType,
-          },
-          timeout: 10000,
-          validateStatus: () => true,
-        });
-
-        delivery.statusCode = response.status;
-        delivery.status = response.status >= 200 && response.status < 300
-          ? "delivered"
-          : "failed";
-        delivery.errorMessage = delivery.status === "failed"
-          ? "Webhook endpoint returned a non-2xx response."
-          : "";
-        delivery.latencyMs = Date.now() - startedAt;
-        delivery.deliveredAt = delivery.status === "delivered"
-          ? new Date()
-          : delivery.deliveredAt;
-      } catch (err) {
-        delivery.status = "failed";
-        delivery.statusCode = null;
-        delivery.errorMessage = "Webhook endpoint could not be reached.";
-        delivery.latencyMs = Date.now() - startedAt;
-      }
+      const result = await merchantWebhookService.attemptDelivery(
+        webhook,
+        payload,
+        delivery.eventType
+      );
+      delivery.status = result.status;
+      delivery.statusCode = result.statusCode;
+      delivery.errorCode = result.errorCode;
+      delivery.errorMessage = result.errorMessage;
+      delivery.latencyMs = result.latencyMs;
+      delivery.deliveredAt = result.deliveredAt || delivery.deliveredAt;
     }
 
     await delivery.save();

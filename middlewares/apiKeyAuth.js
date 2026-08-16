@@ -8,6 +8,9 @@ const ApiLog =
   require("../models/ApiLog");
 const Merchant =
   require("../models/Merchant");
+const User = require("../models/User");
+const { canUseSandboxApiKey } =
+  require("../services/apiKeyAccessPolicy");
 
 const SENSITIVE_FIELDS = [
   "authorization",
@@ -190,12 +193,25 @@ module.exports = async (
     const merchant =
       await Merchant.findById(apiKey.merchant);
 
-    if (!merchant || merchant.active === false) {
+    const owner = merchant
+      ? await User.findOne({
+          merchantId: merchant._id,
+          role: "merchant_owner",
+        })
+      : null;
+
+    if (!canUseSandboxApiKey({
+      apiKey,
+      secretKey,
+      secretMatches: valid,
+      merchant,
+      owner,
+    })) {
       return res.status(401).json({
         success: false,
         error: {
           code: "unauthorized",
-          message: "Merchant account is inactive.",
+          message: "Authentication failed.",
         },
       });
     }

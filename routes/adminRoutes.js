@@ -12,6 +12,7 @@ const FraudLog = require("../models/FraudLog");
 const AuditLog = require("../models/AuditLog");
 const createAuditLog = require("../utils/createAuditLog");
 const { ADMIN_ROLES, hasPermission } = require("../config/adminPermissions");
+const { isMerchantRole } = require("../services/merchantSessionSecurity");
 
 const router = express.Router();
 router.use(auth, adminAuth);
@@ -30,32 +31,60 @@ router.get("/users", permission("user:view"), async (req, res) => {
 router.post("/users/:id/freeze", permission("user:freeze"), async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 400, "INVALID_ID", "Invalid user ID.");
   const hours = Number(req.body?.hours); const freezeUntil = Number.isFinite(hours) && hours > 0 ? new Date(Date.now() + hours * 3600000) : null;
-  const target = await User.findById(req.params.id).select("+adminSecurityVersion");
+  const target = await User.findById(req.params.id).select("+adminSecurityVersion +merchantSecurityVersion");
   if (!target) return fail(res, 404, "USER_NOT_FOUND", "User not found.");
   if (ADMIN_ROLES.includes(target.role) && (req.user.role !== "super_admin" || !hasPermission(req.user, "admin:update") || String(target._id) === String(req.user._id))) return fail(res, 403, "ADMIN_SCOPE_REQUIRED", "Administrator restrictions require higher management authority.");
-  target.frozen = true; target.freezeUntil = freezeUntil; target.freezeReason = req.body?.reason || "Admin freeze"; if (ADMIN_ROLES.includes(target.role)) target.adminSecurityVersion = Number(target.adminSecurityVersion || 0) + 1; await target.save(); const user = target;
+  const versionField = ADMIN_ROLES.includes(target.role)
+    ? "adminSecurityVersion"
+    : isMerchantRole(target.role)
+    ? "merchantSecurityVersion"
+    : null;
+  const update = {
+    $set: {
+      frozen: true,
+      freezeUntil,
+      freezeReason: req.body?.reason || "Admin freeze",
+      ...(isMerchantRole(target.role) ? { refreshToken: null, refreshTokenExpires: null } : {}),
+    },
+  };
+  if (versionField) update.$inc = { [versionField]: 1 };
+  const user = await User.findByIdAndUpdate(target._id, update, { new: true })
+    .select("+adminSecurityVersion +merchantSecurityVersion");
   if (!user) return fail(res, 404, "USER_NOT_FOUND", "User not found.");
-  await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "user_frozen", targetType: "user", targetId: user._id, targetLabel: user.email, severity: "high", metadata: { reason: req.body?.reason || null, hours: Number.isFinite(hours) ? hours : null }, req });
+  await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "user_frozen", targetType: "user", targetId: user._id, targetLabel: user.email, severity: "high", metadata: { reason: req.body?.reason || null, hours: Number.isFinite(hours) ? hours : null, previousVersion: versionField ? Number(target[versionField] || 0) : null, newVersion: versionField ? Number(user[versionField] || 0) : null, sessionsInvalidated: Boolean(versionField) }, req });
   if (ADMIN_ROLES.includes(user.role)) await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "admin.session.invalidated", targetType: "admin", targetId: user._id, targetLabel: user.email, severity: "high", metadata: { reason: "admin.frozen", securityVersion: user.adminSecurityVersion }, req });
+  if (isMerchantRole(user.role)) await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "merchant.session.invalidated", targetType: "merchant_session", targetId: user._id, targetLabel: user.email, severity: "high", metadata: { reason: "merchant.frozen", previousVersion: Number(target.merchantSecurityVersion || 0), newVersion: Number(user.merchantSecurityVersion || 0) }, req });
   res.json({ success: true, data: user });
 });
 
 router.post("/users/:id/unfreeze", permission("user:freeze"), async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 400, "INVALID_ID", "Invalid user ID.");
-  const user = await User.findByIdAndUpdate(req.params.id, { frozen: false, freezeUntil: null, freezeReason: null }, { new: true }).select("-password");
-  if (!user) return fail(res, 404, "USER_NOT_FOUND", "User not found.");
-  await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "user_unfrozen", targetType: "user", targetId: user._id, targetLabel: user.email, severity: "medium", req });
+  const target = await User.findById(req.params.id).select("+adminSecurityVersion +merchantSecurityVersion");
+  if (!target) return fail(res, 404, "USER_NOT_FOUND", "User not found.");
+  if (ADMIN_ROLES.includes(target.role) && (req.user.role !== "super_admin" || !hasPermission(req.user, "admin:update") || String(target._id) === String(req.user._id))) return fail(res, 403, "ADMIN_SCOPE_REQUIRED", "Administrator restrictions require higher management authority.");
+  const versionField = ADMIN_ROLES.includes(target.role)
+    ? "adminSecurityVersion"
+    : isMerchantRole(target.role)
+    ? "merchantSecurityVersion"
+    : null;
+  const update = { $set: { frozen: false, freezeUntil: null, freezeReason: null, ...(isMerchantRole(target.role) ? { refreshToken: null, refreshTokenExpires: null } : {}) } };
+  if (versionField) update.$inc = { [versionField]: 1 };
+  const user = await User.findByIdAndUpdate(target._id, update, { new: true }).select("+adminSecurityVersion +merchantSecurityVersion");
+  await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "user_unfrozen", targetType: "user", targetId: user._id, targetLabel: user.email, severity: "medium", metadata: { previousVersion: versionField ? Number(target[versionField] || 0) : null, newVersion: versionField ? Number(user[versionField] || 0) : null, sessionsInvalidated: Boolean(versionField) }, req });
+  if (ADMIN_ROLES.includes(user.role)) await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "admin.session.invalidated", targetType: "admin", targetId: user._id, targetLabel: user.email, severity: "high", metadata: { reason: "admin.unfrozen", securityVersion: user.adminSecurityVersion }, req });
+  if (isMerchantRole(user.role)) await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "merchant.session.invalidated", targetType: "merchant_session", targetId: user._id, targetLabel: user.email, severity: "high", metadata: { reason: "merchant.unfrozen", previousVersion: Number(target.merchantSecurityVersion || 0), newVersion: Number(user.merchantSecurityVersion || 0) }, req });
   res.json({ success: true, data: user });
 });
 
 router.get("/metrics", permission("analytics:view"), async (req, res) => {
   const environment = req.query.environment || "sandbox";
   if (!['sandbox', 'live'].includes(environment)) return fail(res, 400, "INVALID_ENVIRONMENT", "Environment must be sandbox or live.");
-  const match = { environment, livemode: environment === "live" };
+  if (req.query.merchant && !mongoose.isValidObjectId(req.query.merchant)) return fail(res, 400, "INVALID_ID", "Invalid merchant ID.");
+  const match = { environment, livemode: environment === "live", ...(req.query.merchant ? { merchant: new mongoose.Types.ObjectId(req.query.merchant) } : {}) };
   const [summaries, pendingSettlements, completedSettlements, activeMerchants, apiRequests] = await Promise.all([
     Transaction.aggregate([{ $match: match }, { $group: { _id: { $toLower: "$currency" }, totalTransactions: { $sum: 1 }, successfulPayments: { $sum: { $cond: [{ $in: ["$status", ["completed", "refunded"]] }, 1, 0] } }, failedPayments: { $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] } }, grossVolume: { $sum: { $cond: [{ $in: ["$status", ["completed", "refunded"]] }, "$amount", 0] } }, fees: { $sum: { $ifNull: ["$merchantFee", { $ifNull: ["$estimatedFee", 0] }] } }, netMerchantValue: { $sum: { $ifNull: ["$merchantNet", { $ifNull: ["$estimatedNet", 0] }] } }, refunds: { $sum: { $ifNull: ["$refund.refundAmount", 0] } } } }]),
     Settlement.countDocuments({ ...match, status: "pending" }), Settlement.countDocuments({ ...match, status: "completed" }),
-    Transaction.distinct("merchant", match).then((ids) => Merchant.countDocuments({ _id: { $in: ids }, active: true })), ApiLog.countDocuments({ environment }),
+    Transaction.distinct("merchant", match).then((ids) => Merchant.countDocuments({ _id: { $in: ids }, active: true })), ApiLog.countDocuments({ environment, ...(req.query.merchant ? { merchant: match.merchant } : {}) }),
   ]);
   const monetaryByCurrency = summaries.map(({ _id, grossVolume, fees, netMerchantValue, refunds }) => ({ currency: _id || "unknown", grossVolume, fees, netMerchantValue, refunds }));
   const totals = summaries.reduce((value, row) => ({ totalTransactions: value.totalTransactions + row.totalTransactions, successfulPayments: value.successfulPayments + row.successfulPayments, failedPayments: value.failedPayments + row.failedPayments }), { totalTransactions: 0, successfulPayments: 0, failedPayments: 0 });

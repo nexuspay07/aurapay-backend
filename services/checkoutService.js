@@ -3,8 +3,6 @@ const crypto = require("crypto");
 const checkoutRepository =
   require("../repositories/checkoutRepository");
 
-const stripeService =
-  require("./stripeService");
 const sandboxPaymentSimulationService =
   require("./sandboxPaymentSimulationService");
 

@@ -4,9 +4,6 @@ module.exports = function registerRoutes(app) {
   // ROUTE IMPORTS
   // ======================================
 
-  const stripeWebhookRoutes =
-    require("./stripeWebhookRoutes");
-
   const publicApiV1Routes =
     require("./api/v1");
 
@@ -30,18 +27,6 @@ module.exports = function registerRoutes(app) {
 
   const checkoutOperationsRoutes =
     require("./checkoutOperationsRoutes");
-
-  const paymentRoutes =
-    require("./paymentRoutes");
-
-  const paymentCompletionRoutes =
-    require("./paymentCompletionRoutes");
-
-  const paypalCheckoutRoutes =
-    require("./paypalCheckoutRoutes");
-
-  const stripeRoutes =
-    require("./stripeRoutes");
 
   const walletRoutes =
     require("./walletRoutes");
@@ -78,15 +63,6 @@ module.exports = function registerRoutes(app) {
 
   const auditRoutes =
     require("./auditRoutes");
-
-  // ======================================
-  // STRIPE WEBHOOK
-  // ======================================
-
-  app.use(
-    "/stripe",
-    stripeWebhookRoutes
-  );
 
   app.use(
     "/api/v1",
@@ -212,50 +188,6 @@ app.use(
   app.use(
     "/api/checkout-ops",
     checkoutOperationsRoutes
-  );
-
-  // ======================================
-  // PAYMENTS
-  // ======================================
-
-  app.use(
-    "/payments",
-    paymentRoutes
-  );
-
-  app.use(
-    "/api/payments",
-    paymentRoutes
-  );
-
-  app.use(
-    "/payment-completion",
-    paymentCompletionRoutes
-  );
-
-  app.use(
-    "/api/payment-completion",
-    paymentCompletionRoutes
-  );
-
-  app.use(
-    "/paypal-checkout",
-    paypalCheckoutRoutes
-  );
-
-  app.use(
-    "/api/paypal-checkout",
-    paypalCheckoutRoutes
-  );
-
-  app.use(
-    "/stripe",
-    stripeRoutes
-  );
-
-  app.use(
-    "/api/stripe",
-    stripeRoutes
   );
 
   // ======================================

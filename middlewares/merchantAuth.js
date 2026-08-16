@@ -3,58 +3,52 @@ const mongoose = require("mongoose");
 
 const User = require("../models/User");
 const Merchant = require("../models/Merchant");
+const {
+  isMerchantSessionAllowed,
+} = require("../services/merchantSessionSecurity");
 
-module.exports = async function merchantAuth(req, res, next) {
+function unauthorized(res) {
+  return res.status(401).json({
+    success: false,
+    error: "Invalid authentication token.",
+  });
+}
+
+function createMerchantAuth(dependencies = {}) {
+  const UserModel = dependencies.UserModel || User;
+  const MerchantModel = dependencies.MerchantModel || Merchant;
+  const jwtLibrary = dependencies.jwtLibrary || jwt;
+
+  return async function merchantAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        success: false,
-        error: "No authentication token provided.",
-      });
+      return unauthorized(res);
     }
 
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwtLibrary.verify(token, process.env.JWT_SECRET);
 
     if (!mongoose.Types.ObjectId.isValid(decoded.id)) {
-      return res.status(401).json({
-        success: false,
-        error: "Invalid authentication token.",
-      });
+      return unauthorized(res);
     }
 
-    const user = await User.findById(decoded.id);
+    const user = await UserModel.findById(decoded.id)
+      .select("+merchantSecurityVersion");
 
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: "User not found.",
-      });
-    }
-
-    if (!["merchant_owner", "merchant_staff"].includes(user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: "Merchant access required.",
-      });
+      return unauthorized(res);
     }
 
     if (!user.merchantId) {
-      return res.status(404).json({
-        success: false,
-        error: "Merchant account not linked.",
-      });
+      return unauthorized(res);
     }
 
-    const merchant = await Merchant.findById(user.merchantId);
+    const merchant = await MerchantModel.findById(user.merchantId);
 
-    if (!merchant) {
-      return res.status(404).json({
-        success: false,
-        error: "Merchant not found.",
-      });
+    if (!isMerchantSessionAllowed(decoded, user, merchant)) {
+      return unauthorized(res);
     }
 
     req.user = user;
@@ -62,9 +56,12 @@ module.exports = async function merchantAuth(req, res, next) {
 
     next();
   } catch (err) {
-    return res.status(401).json({
-      success: false,
-      error: "Invalid authentication token.",
-    });
+    return unauthorized(res);
   }
-};
+  };
+}
+
+const merchantAuth = createMerchantAuth();
+module.exports = merchantAuth;
+module.exports.createMerchantAuth = createMerchantAuth;
+module.exports.unauthorized = unauthorized;

@@ -4,6 +4,8 @@ const http = require("http");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const { assertSafeDestructiveOperation, connectTestDatabase, disconnectTestDatabase } = require("./helpers/testDatabase");
+const { installExternalNetworkTripwire } = require("./helpers/networkIsolation");
 process.env.ADMIN_LOGIN_LIMIT = "3";
 process.env.ADMIN_EMAIL_DELIVERY_DISABLED = "true";
 const app = require("../app");
@@ -14,6 +16,7 @@ const Settlement = require("../models/Settlement");
 const AuditLog = require("../models/AuditLog");
 const AdminInvitation = require("../models/AdminInvitation");
 const crypto = require("crypto");
+const { createVerifiedMerchantOwner } = require("./helpers/merchantFixtures");
 
 const runId = `admin-v2-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const ids = { users: [], merchants: [], transactions: [], settlements: [], invitations: [] };
@@ -24,19 +27,21 @@ const request = async (method, path, body, token) => {
 };
 
 test.before(async () => {
-  await mongoose.connect(process.env.MONGO_URI_TEST || process.env.MONGO_URI);
+  installExternalNetworkTripwire();
+  await connectTestDatabase();
   merchant = await Merchant.create({ businessName: runId, legalName: `${runId} LLC`, businessType: "corporation", contactEmail: `${runId}@test.invalid`, country: "CA", active: true }); ids.merchants.push(merchant._id);
   superAdmin = await User.create({ email: `${runId}-admin@test.invalid`, password: await bcrypt.hash("AdminPass123!", 4), role: "super_admin", permissions: [], status: "verified" }); ids.users.push(superAdmin._id);
-  merchantUser = await User.create({ email: `${runId}-merchant@test.invalid`, password: await bcrypt.hash("MerchantPass123!", 4), role: "merchant_owner", merchantId: merchant._id, status: "verified" }); ids.users.push(merchantUser._id);
-  adminToken = jwt.sign({ id: superAdmin._id }, process.env.JWT_SECRET, { expiresIn: "5m" }); merchantToken = jwt.sign({ id: merchantUser._id }, process.env.JWT_SECRET, { expiresIn: "5m" });
+  merchantUser = await createVerifiedMerchantOwner(merchant, { email: `${runId}-merchant@test.invalid` }); ids.users.push(merchantUser._id);
+  adminToken = jwt.sign({ id: superAdmin._id }, process.env.JWT_SECRET, { expiresIn: "5m" }); merchantToken = jwt.sign({ id: merchantUser._id, merchantSecurityVersion: 0 }, process.env.JWT_SECRET, { expiresIn: "5m" });
   server = http.createServer(app); await new Promise((resolve) => server.listen(0, resolve)); baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
 
 test.after(async () => {
+  assertSafeDestructiveOperation();
   await AuditLog.deleteMany({ $or: [{ admin: { $in: ids.users } }, { targetId: { $in: [...ids.users, ...ids.merchants, ...ids.settlements].map(String) } }] });
   await AdminInvitation.deleteMany({ _id: { $in: ids.invitations } });
   await Settlement.deleteMany({ _id: { $in: ids.settlements } }); await Transaction.deleteMany({ _id: { $in: ids.transactions } }); await User.deleteMany({ _id: { $in: ids.users } }); await Merchant.deleteMany({ _id: { $in: ids.merchants } });
-  if (server?.listening) await new Promise((resolve) => server.close(resolve)); await mongoose.disconnect();
+  if (server?.listening) await new Promise((resolve) => server.close(resolve)); await disconnectTestDatabase();
 });
 
 test("public merchant list/detail and legacy applications are rejected", async () => {
@@ -64,7 +69,7 @@ test("admin login is safe, validates bodies, and rate limits failures", async ()
 test("sandbox metrics exclude legacy unknown records and expose canonical values", async () => {
   const txs = await Transaction.create([{ merchant: merchant._id, amount: 125, currency: "usd", provider: "Test", environment: "sandbox", livemode: false, status: "completed", merchantFee: 5, merchantNet: 120 }, { merchant: merchant._id, amount: 75, currency: "usd", provider: "Test", environment: "sandbox", livemode: false, status: "failed" }]); ids.transactions.push(...txs.map((x) => x._id));
   const legacy = await Transaction.collection.insertOne({ merchant: merchant._id, amount: 7000, currency: "usd", provider: "Stripe", status: "completed", createdAt: new Date(), updatedAt: new Date() }); ids.transactions.push(legacy.insertedId);
-  const result = await request("GET", "/admin/metrics?environment=sandbox", null, adminToken); assert.equal(result.status, 200); assert.equal(result.body.data.totalTransactions, 2); assert.equal(result.body.data.grossVolume, 125); assert.equal(result.body.data.fees, 5); assert.equal(result.body.data.netMerchantValue, 120);
+  const result = await request("GET", `/admin/metrics?environment=sandbox&merchant=${merchant._id}`, null, adminToken); assert.equal(result.status, 200); assert.equal(result.body.data.totalTransactions, 2); assert.equal(result.body.data.grossVolume, 125); assert.equal(result.body.data.fees, 5); assert.equal(result.body.data.netMerchantValue, 120);
 });
 
 test("canonical transaction query and sandbox settlement completion work with audit", async () => {

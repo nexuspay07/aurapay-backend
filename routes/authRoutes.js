@@ -2,36 +2,42 @@ const express = require("express");
 const router = express.Router();
 
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 
 const User = require("../models/User");
+const Merchant = require("../models/Merchant");
+const { ADMIN_ROLES } = require("../config/adminPermissions");
+const createAuditLog = require("../utils/createAuditLog");
+const {
+  canMerchantAuthenticate,
+  isMerchantRole,
+} = require("../services/merchantSessionSecurity");
+const { createAccessToken } =
+  require("../services/merchantAccessTokenService");
 
 const {
   sendVerificationEmail,
   sendPasswordResetEmail,
 } = require("../services/emailService");
 
+function publicUser(user) {
+  return {
+    id: user._id,
+    email: user.email,
+    role: user.role,
+    merchantId: user.merchantId,
+    status: user.status,
+    emailVerified: user.emailVerified,
+    onboardingCompleted: user.onboardingCompleted,
+  };
+}
+
 
 
 // ======================================
 // JWT TOKEN
 // ======================================
-
-function createAccessToken(user) {
-  return jwt.sign(
-    {
-      id: user._id,
-      role: user.role,
-      merchantId: user.merchantId,
-    },
-    process.env.JWT_SECRET,
-    {
-      expiresIn: "7d",
-    }
-  );
-}
 
 // ======================================
 // REGISTER
@@ -179,13 +185,10 @@ router.post(
       const user =
   await User.findOne({
     email: email.toLowerCase(),
-  }).select("+password");
+  }).select("+password +merchantSecurityVersion");
 
-      if (!user) {
-        return res.status(404).json({
-          error:
-            "User not found",
-        });
+      if (!user || ADMIN_ROLES.includes(user.role)) {
+        return res.status(401).json({ error: "Invalid email or password." });
       }
 
       const match =
@@ -213,11 +216,19 @@ router.post(
 
   await user.save();
 
-  return res.status(401).json({
-    error:
-      "Invalid password",
-  });
+  return res.status(401).json({ error: "Invalid email or password." });
 }
+
+      if (isMerchantRole(user.role)) {
+        const merchant = user.merchantId
+          ? await Merchant.findById(user.merchantId)
+          : null;
+        if (!canMerchantAuthenticate(user, merchant)) {
+          return res.status(401).json({ error: "Invalid email or password." });
+        }
+      } else if (user.frozen === true || user.status !== "verified") {
+        return res.status(401).json({ error: "Invalid email or password." });
+      }
 
       // ==================================
       // EMAIL NOT VERIFIED
@@ -271,7 +282,7 @@ res.json({
 
   refreshToken,
 
-  user,
+  user: publicUser(user),
 });
     } catch (err) {
       res.status(500).json({
@@ -563,7 +574,7 @@ router.post(
         await User.findOne({
           passwordResetToken:
   hashedToken,
-        });
+        }).select("+passwordResetToken +merchantSecurityVersion");
 
       if (!user) {
         return res.status(400).json({
@@ -609,25 +620,46 @@ if (!passwordRegex.test(password)) {
           10
         );
 
-      user.password =
-        hashedPassword;
+      const update = {
+        $set: {
+          password: hashedPassword,
+          passwordResetToken: null,
+          passwordResetExpires: null,
+          refreshToken: null,
+          refreshTokenExpires: null,
+          loginAttempts: 0,
+          lockedUntil: null,
+        },
+      };
+      if (isMerchantRole(user.role)) {
+        update.$inc = { merchantSecurityVersion: 1 };
+      }
 
-      // ======================================
-      // CLEAR RESET TOKEN
-      // ======================================
+      const updatedUser = await User.findOneAndUpdate(
+        { _id: user._id, passwordResetToken: hashedToken },
+        update,
+        { new: true }
+      ).select("+merchantSecurityVersion");
+      if (!updatedUser) {
+        return res.status(400).json({ error: "Invalid reset link." });
+      }
 
-      user.passwordResetToken =
-        null;
-
-      user.passwordResetExpires =
-        null;
-
-      user.loginAttempts = 0;
-
-      user.lockedUntil =
-        null;
-
-      await user.save();
+      if (isMerchantRole(updatedUser.role)) {
+        await createAuditLog({
+          admin: updatedUser._id,
+          actorEmail: updatedUser.email,
+          action: "merchant.password.reset.completed",
+          targetType: "merchant_session",
+          targetId: updatedUser._id,
+          targetLabel: updatedUser.email,
+          severity: "high",
+          metadata: {
+            sessionsInvalidated: true,
+            securityVersion: updatedUser.merchantSecurityVersion,
+          },
+          req,
+        });
+      }
 
       res.json({
         success: true,
@@ -663,7 +695,7 @@ router.post(
       const user =
         await User.findOne({
           refreshToken,
-        });
+        }).select("+refreshToken +merchantSecurityVersion");
 
       if (!user) {
         return res.status(401).json({
@@ -743,6 +775,21 @@ router.post(
           success: false,
           message: "Invalid ID.",
         });
+      }
+
+      if (
+        !isMerchantRole(user.role) ||
+        !user.refreshTokenExpires ||
+        user.refreshTokenExpires <= new Date()
+      ) {
+        return res.status(401).json({ error: "Invalid refresh token." });
+      }
+
+      const merchant = user.merchantId
+        ? await Merchant.findById(user.merchantId)
+        : null;
+      if (!canMerchantAuthenticate(user, merchant)) {
+        return res.status(401).json({ error: "Invalid refresh token." });
       }
 
       const user =

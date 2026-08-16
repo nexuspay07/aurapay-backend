@@ -4,9 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/*.test.js",
-    "test:api": "node --test tests/api-v1.test.js",
-    "test:smoke": "node tests/api-v1-smoke.js"
+    "test": "set NODE_ENV=test&& node --test tests/*.test.js",
+    "test:unit": "node --test tests/admin-rbac.test.js tests/database-safety.test.js tests/merchant-session-security.test.js tests/network-isolation.test.js tests/provider-quarantine.test.js tests/webhook-egress-security.test.js",
+    "test:integration": "set NODE_ENV=test&& node --test tests/api-v1.test.js tests/admin-api.test.js tests/phase3-runtime.integration.test.js",
+    "test:api": "set NODE_ENV=test&& node --test tests/api-v1.test.js",
+    "test:smoke": "set NODE_ENV=test&& node tests/api-v1-smoke.js",
+    "test:security": "node --test tests/database-safety.test.js tests/merchant-session-security.test.js tests/network-isolation.test.js tests/provider-quarantine.test.js tests/webhook-egress-security.test.js",
+    "test:cleanup-run": "set NODE_ENV=test&& node tests/cleanup-e2e-run.js"
   },
   "keywords": [],
   "author": "",

@@ -30,6 +30,8 @@ const merchantWebhookSchema = new mongoose.Schema(
 
       required: true,
 
+      select: false,
+
     },
 
     eventTypes: [

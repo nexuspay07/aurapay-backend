@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const http = require("http");
 const mongoose = require("mongoose");
+const { assertSafeDestructiveOperation, connectTestDatabase, disconnectTestDatabase, runId } = require("./helpers/testDatabase");
+const { installExternalNetworkTripwire } = require("./helpers/networkIsolation");
 
 process.env.API_RATE_LIMIT_MAX = process.env.API_RATE_LIMIT_MAX || "1000";
 process.env.API_RATE_LIMIT_WINDOW_MS =
@@ -18,11 +20,14 @@ const Transaction = require("../models/Transaction");
 const User = require("../models/User");
 const WebhookDelivery = require("../models/WebhookDelivery");
 const apiKeyService = require("../services/apiKeyService");
+const { createSandboxApiKey, createVerifiedMerchantAccount } = require("./helpers/merchantFixtures");
 
 let server;
 let baseUrl;
 let merchant;
 let otherMerchant;
+let owner;
+let otherOwner;
 let fullKey;
 let fullSecret;
 let readOnlySecret;
@@ -38,12 +43,8 @@ const createdIds = {
 };
 
 test.before(async () => {
-  const mongoUri = process.env.MONGO_URI_TEST || process.env.MONGO_URI;
-  assert.ok(mongoUri, "MONGO_URI_TEST or MONGO_URI is required for API tests");
-
-  if (mongoose.connection.readyState === 0) {
-    await mongoose.connect(mongoUri);
-  }
+  installExternalNetworkTripwire();
+  await connectTestDatabase();
 
   server = http.createServer(app);
   await new Promise((resolve) => {
@@ -51,38 +52,13 @@ test.before(async () => {
   });
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  merchant = await Merchant.create({
-    businessName: "API Test Merchant",
-    legalName: "API Test Merchant LLC",
-    businessType: "corporation",
-    contactEmail: `api-${Date.now()}@aurapay.test`,
-    country: "US",
-    active: true,
-    verificationStatus: "verified",
-  });
-  otherMerchant = await Merchant.create({
-    businessName: "Other API Merchant",
-    legalName: "Other API Merchant LLC",
-    businessType: "corporation",
-    contactEmail: `other-api-${Date.now()}@aurapay.test`,
-    country: "US",
-    active: true,
-    verificationStatus: "verified",
-  });
+  ({ merchant, owner } = await createVerifiedMerchantAccount());
+  ({ merchant: otherMerchant, owner: otherOwner } = await createVerifiedMerchantAccount());
   createdIds.merchants.push(merchant._id, otherMerchant._id);
+  createdIds.users.push(owner._id, otherOwner._id);
 
-  const user = await User.create({
-    email: `owner-${Date.now()}@aurapay.test`,
-    password: "hashed-test-password",
-    role: "merchant_owner",
-    merchantId: merchant._id,
-  });
-  createdIds.users.push(user._id);
-
-  const full = await apiKeyService.createApiKey({
-    merchant: merchant._id,
+  const full = await createSandboxApiKey(merchant, {
     name: "Full test key",
-    environment: "sandbox",
     permissions: [
       "payments:create",
       "payments:read",
@@ -99,39 +75,31 @@ test.before(async () => {
   fullSecret = full.secretKey;
   createdIds.apiKeys.push(full.apiKey._id);
 
-  const readOnly = await apiKeyService.createApiKey({
-    merchant: merchant._id,
+  const readOnly = await createSandboxApiKey(merchant, {
     name: "Read-only test key",
-    environment: "sandbox",
     permissions: ["payments:read"],
   });
   readOnlySecret = readOnly.secretKey;
   createdIds.apiKeys.push(readOnly.apiKey._id);
 
-  const revoked = await apiKeyService.createApiKey({
-    merchant: merchant._id,
+  const revoked = await createSandboxApiKey(merchant, {
     name: "Revoked test key",
-    environment: "sandbox",
     permissions: ["payments:read"],
   });
   revokedSecret = revoked.secretKey;
   await ApiKey.findByIdAndUpdate(revoked.apiKey._id, { active: false });
   createdIds.apiKeys.push(revoked.apiKey._id);
 
-  const expired = await apiKeyService.createApiKey({
-    merchant: merchant._id,
+  const expired = await createSandboxApiKey(merchant, {
     name: "Expired test key",
-    environment: "sandbox",
     permissions: ["payments:read"],
     expiresAt: new Date(Date.now() - 1000),
   });
   expiredSecret = expired.secretKey;
   createdIds.apiKeys.push(expired.apiKey._id);
 
-  const other = await apiKeyService.createApiKey({
-    merchant: otherMerchant._id,
+  const other = await createSandboxApiKey(otherMerchant, {
     name: "Other merchant key",
-    environment: "sandbox",
     permissions: ["payments:read"],
   });
   otherSecret = other.secretKey;
@@ -154,6 +122,7 @@ test.before(async () => {
 });
 
 test.after(async () => {
+  assertSafeDestructiveOperation();
   await ApiLog.deleteMany({ merchant: { $in: createdIds.merchants } });
   await IdempotencyKey.deleteMany({ merchant: { $in: createdIds.merchants } });
   await WebhookDelivery.deleteMany({ merchant: { $in: createdIds.merchants } });
@@ -165,7 +134,7 @@ test.after(async () => {
   await Merchant.deleteMany({ _id: { $in: createdIds.merchants } });
 
   await new Promise((resolve) => server.close(resolve));
-  await mongoose.disconnect();
+  await disconnectTestDatabase();
 });
 
 test("missing key returns 401", async () => {
@@ -477,7 +446,7 @@ test("server remains stable after failed requests", async () => {
   await request("GET", "/api/v1/payments/bad-id", {
     token: fullSecret,
   });
-  const res = await request("GET", "/test");
+  const res = await request("GET", "/health");
   assert.equal(res.status, 200);
 });
 

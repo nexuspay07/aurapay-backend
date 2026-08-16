@@ -1,40 +1,33 @@
 const http = require("http");
 const mongoose = require("mongoose");
+const { assertSafeDestructiveOperation, connectTestDatabase, disconnectTestDatabase } = require("./helpers/testDatabase");
+const { installExternalNetworkTripwire } = require("./helpers/networkIsolation");
 
 const app = require("../app");
 const ApiLog = require("../models/ApiLog");
 const ApiKey = require("../models/ApiKey");
 const Merchant = require("../models/Merchant");
 const Transaction = require("../models/Transaction");
+const User = require("../models/User");
 const apiKeyService = require("../services/apiKeyService");
+const { createSandboxApiKey, createVerifiedMerchantAccount } = require("./helpers/merchantFixtures");
 
 async function main() {
   const runId = `smoke-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   let merchant = null;
+  let owner = null;
   let server = null;
-  const mongoUri = process.env.MONGO_URI_TEST || process.env.MONGO_URI;
-
-  if (!mongoUri) {
-    throw new Error("MONGO_URI_TEST or MONGO_URI is required for smoke test");
-  }
-
   try {
-  await mongoose.connect(mongoUri);
+  installExternalNetworkTripwire();
+  await connectTestDatabase();
 
-  merchant = await Merchant.create({
+  ({ merchant, owner } = await createVerifiedMerchantAccount({ merchant: {
     businessName: `Smoke Merchant ${runId}`,
     legalName: `Smoke Merchant ${runId} LLC`,
-    businessType: "corporation",
-    contactEmail: `smoke-${Date.now()}@aurapay.test`,
-    country: "US",
-    active: true,
-    verificationStatus: "verified",
-  });
+  } }));
 
-  const key = await apiKeyService.createApiKey({
-    merchant: merchant._id,
+  const key = await createSandboxApiKey(merchant, {
     name: "Smoke key",
-    environment: "sandbox",
     permissions: ["account:read"],
   });
 
@@ -71,17 +64,19 @@ async function main() {
   } finally {
     if (server?.listening) await new Promise((resolve) => server.close(resolve));
     if (merchant?._id) {
+      assertSafeDestructiveOperation();
       await ApiLog.deleteMany({ merchant: merchant._id }).catch(() => {});
       await Transaction.deleteMany({ merchant: merchant._id }).catch(() => {});
       await ApiKey.deleteMany({ merchant: merchant._id }).catch(() => {});
+      if (owner?._id) await User.deleteOne({ _id: owner._id, merchantId: merchant._id }).catch(() => {});
       await Merchant.deleteOne({ _id: merchant._id, businessName: `Smoke Merchant ${runId}` }).catch(() => {});
     }
-    await mongoose.disconnect().catch(() => {});
+    await disconnectTestDatabase().catch(() => {});
   }
 }
 
 main().catch(async (error) => {
   console.error(error.message);
-  await mongoose.disconnect().catch(() => {});
+  await disconnectTestDatabase().catch(() => {});
   process.exit(1);
 });

@@ -1,10 +1,10 @@
 const mongoose = require("mongoose");
+const { validateTestDatabaseUri } = require("./testDatabaseSafety");
 
 async function connectDatabase() {
   try {
-    await mongoose.connect(
-      process.env.MONGO_URI
-    );
+    const uri = process.env.NODE_ENV === "test" ? validateTestDatabaseUri().uri : process.env.MONGO_URI;
+    await mongoose.connect(uri);
 
     console.log(
       "✅ MongoDB Connected"

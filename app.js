@@ -22,30 +22,6 @@ app.get("/health", (req, res) => {
   });
 });
 
-app.post("/test", (req, res) => {
-
-  console.log("TEST ROUTE HIT");
-
-  return res.json({
-
-    success: true,
-
-    message: "Test route works"
-
-  });
-
-});
-
-app.get("/test", (req, res) => {
-
-  console.log("GET TEST");
-
-  res.json({
-    success: true
-  });
-
-});
-
 // ======================================
 // CORS
 // ======================================
@@ -53,18 +29,6 @@ app.get("/test", (req, res) => {
 app.use(corsConfig);
 
 console.log("3 - CORS registered");
-
-// ======================================
-// STRIPE WEBHOOK (RAW BODY)
-// Must come BEFORE express.json()
-// ======================================
-
-app.use(
-  "/stripe/webhook",
-  express.raw({
-    type: "application/json",
-  })
-);
 
 // ======================================
 // BODY PARSERS

@@ -1,6 +1,10 @@
 require("dotenv").config();
 //require("./jobs/eventDispatcherJob");
 
+if (process.env.NODE_ENV === "test") {
+  require("./config/testNetworkIsolation").installExternalNetworkTripwire();
+}
+
 const http = require("http");
 
 const app = require("./app");

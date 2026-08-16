@@ -8,6 +8,8 @@ const auth = require("../middlewares/auth");
 const adminAuth = require("../middlewares/adminAuth");
 const permission = require("../middlewares/permission");
 const createAuditLog = require("../utils/createAuditLog");
+const { setMerchantActive } =
+  require("../services/merchantAccountStateService");
 const Merchant = require("../models/Merchant");
 const User =
   require("../models/User");
@@ -264,6 +266,73 @@ router.patch(
       });
     }
   }
+);
+
+async function changeMerchantAccess(req, res, active) {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return invalidId(res);
+    }
+
+    const { merchant, invalidatedUsers } = await setMerchantActive(
+      req.params.id,
+      active
+    );
+    const action = active ? "merchant.enabled" : "merchant.disabled";
+    await createAuditLog({
+      admin: req.user._id,
+      actorEmail: req.user.email,
+      action,
+      targetType: "merchant",
+      targetId: merchant._id,
+      targetLabel: merchant.businessName,
+      severity: "high",
+      metadata: {
+        before: { active: !active },
+        after: { active },
+        reason: req.body?.reason || null,
+        sessionsInvalidated: true,
+        invalidatedUsers,
+      },
+      req,
+    });
+    await createAuditLog({
+      admin: req.user._id,
+      actorEmail: req.user.email,
+      action: "merchant.sessions.invalidated",
+      targetType: "merchant",
+      targetId: merchant._id,
+      targetLabel: merchant.businessName,
+      severity: "high",
+      metadata: { reason: action, invalidatedUsers },
+      req,
+    });
+    return res.json({ success: true, data: merchant });
+  } catch (error) {
+    if (error.code === "MERCHANT_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: { code: error.code, message: error.message } });
+    }
+    if (error.code === "MERCHANT_STATE_UNCHANGED") {
+      return res.status(409).json({ success: false, error: { code: error.code, message: error.message } });
+    }
+    return res.status(500).json({ success: false, error: { code: "MERCHANT_ACCESS_UPDATE_FAILED", message: "Failed to update merchant access." } });
+  }
+}
+
+router.patch(
+  "/:id/disable",
+  auth,
+  adminAuth,
+  permission("merchant:verify"),
+  (req, res) => changeMerchantAccess(req, res, false)
+);
+
+router.patch(
+  "/:id/enable",
+  auth,
+  adminAuth,
+  permission("merchant:verify"),
+  (req, res) => changeMerchantAccess(req, res, true)
 );
 
 module.exports = router;

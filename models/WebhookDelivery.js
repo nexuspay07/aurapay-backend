@@ -44,6 +44,12 @@ const webhookDeliverySchema = new mongoose.Schema(
       default: "",
     },
 
+    errorCode: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
     attempts: {
       type: Number,
       default: 0,
