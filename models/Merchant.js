@@ -40,7 +40,9 @@ const merchantSchema =
       contactEmail: {
         type: String,
         required: true,
+        trim: true,
         lowercase: true,
+        unique: true,
       },
 
       contactPhone: {
@@ -102,6 +104,8 @@ ownerName: {
 ownerEmail: {
   type: String,
   default: "",
+  trim: true,
+  lowercase: true,
 },
 
 kybDocuments: {

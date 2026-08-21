@@ -6,7 +6,7 @@
   "scripts": {
     "test": "set NODE_ENV=test&& node --test tests/*.test.js",
     "test:unit": "node --test tests/admin-rbac.test.js tests/database-safety.test.js tests/merchant-session-security.test.js tests/network-isolation.test.js tests/provider-quarantine.test.js tests/webhook-egress-security.test.js",
-    "test:integration": "set NODE_ENV=test&& node --test tests/api-v1.test.js tests/admin-api.test.js tests/phase3-runtime.integration.test.js",
+    "test:integration": "set NODE_ENV=test&& set EMAIL_DELIVERY_DISABLED=true&& node --test tests/api-v1.test.js tests/admin-api.test.js tests/phase3-runtime.integration.test.js tests/phase5-onboarding.integration.test.js",
     "test:api": "set NODE_ENV=test&& node --test tests/api-v1.test.js",
     "test:smoke": "set NODE_ENV=test&& node tests/api-v1-smoke.js",
     "test:security": "node --test tests/database-safety.test.js tests/merchant-session-security.test.js tests/network-isolation.test.js tests/provider-quarantine.test.js tests/webhook-egress-security.test.js",

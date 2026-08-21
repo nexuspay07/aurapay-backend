@@ -17,9 +17,11 @@ const { createAccessToken } =
   require("../services/merchantAccessTokenService");
 
 const {
-  sendVerificationEmail,
   sendPasswordResetEmail,
 } = require("../services/emailService");
+const { normalizeEmail, validateEmail, PASSWORD_RE } = require("../services/publicAccountInput");
+const { resendVerification, verifyEmail } = require("../services/merchantOnboardingService");
+const { publicAuthRateLimit } = require("../middlewares/publicAuthRateLimit");
 
 function publicUser(user) {
   return {
@@ -46,119 +48,7 @@ function publicUser(user) {
 router.post(
   "/register",
   async (req, res) => {
-    try {
-      const {
-        email,
-        password,
-        role,
-        merchantId,
-      } = req.body;
-
-      if (!email || !password) {
-        return res.status(400).json({
-          error:
-            "Email and password are required",
-        });
-      }
-
-      const existingUser =
-        await User.findOne({
-          email:
-            email.toLowerCase(),
-        });
-
-      if (existingUser) {
-        return res.status(400).json({
-          error:
-            "User already exists",
-        });
-      }
-
-      const hashedPassword =
-        await bcrypt.hash(
-          password,
-          10
-        );
-
-      // ===========================
-      // EMAIL VERIFICATION TOKEN
-      // ===========================
-
-      const verificationToken =
-        crypto.randomBytes(32).toString(
-          "hex"
-        );
-
-        const hashedVerificationToken =
-  crypto
-    .createHash("sha256")
-    .update(verificationToken)
-    .digest("hex");
-
-      const verificationExpiry =
-        new Date(
-          Date.now() +
-            24 *
-              60 *
-              60 *
-              1000
-        );
-
-      const user =
-        await User.create({
-          email:
-            email.toLowerCase(),
-
-          password:
-            hashedPassword,
-
-          role:
-            role || "user",
-
-          merchantId:
-            merchantId ||
-            null,
-
-          status:
-            "unverified",
-
-          emailVerified:
-            false,
-
-          emailVerificationToken:
-  hashedVerificationToken,
-
-          emailVerificationExpires:
-            verificationExpiry,
-        });
-
-      // ===========================
-      // SEND EMAIL
-      // ===========================
-
-      await sendVerificationEmail(
-        user,
-        verificationToken
-      );
-
-      res.status(201).json({
-        message:
-          "Registration successful. Please verify your email.",
-
-        user: {
-          id: user._id,
-          email:
-            user.email,
-          emailVerified:
-            false,
-        },
-      });
-    } catch (err) {
-      res.status(500).json({
-        error:
-          "Registration failed",
-      });
-    }
+    return res.status(410).json({ success: false, error: { code: "MERCHANT_REGISTRATION_MOVED", message: "Use the merchant registration endpoint." } });
   }
 );
 
@@ -170,10 +60,8 @@ router.post(
   "/login",
   async (req, res) => {
     try {
-      const {
-        email,
-        password,
-      } = req.body;
+      const email = normalizeEmail(req.body?.email);
+      const password = req.body?.password;
 
       if (!email || !password) {
         return res.status(400).json({
@@ -184,7 +72,7 @@ router.post(
 
       const user =
   await User.findOne({
-    email: email.toLowerCase(),
+    email,
   }).select("+password +merchantSecurityVersion");
 
       if (!user || ADMIN_ROLES.includes(user.role)) {
@@ -301,59 +189,10 @@ router.get(
   "/verify-email/:token",
   async (req, res) => {
     try {
-      const hashedToken =
-  crypto
-    .createHash("sha256")
-    .update(req.params.token)
-    .digest("hex");
-
-      const user =
-        await User.findOne({
-          emailVerificationToken:
-  hashedToken,
-        });
-
-      if (!user) {
-        return res.status(400).json({
-          error:
-            "Invalid verification link.",
-        });
-      }
-
-      if (
-        !user.emailVerificationExpires ||
-        user.emailVerificationExpires <
-          new Date()
-      ) {
-        return res.status(400).json({
-          error:
-            "Verification link has expired.",
-        });
-      }
-
-      user.emailVerified = true;
-
-      user.status = "verified";
-
-      user.emailVerificationToken =
-        null;
-
-      user.emailVerificationExpires =
-        null;
-
-      await user.save();
-
-      res.json({
-        success: true,
-
-        message:
-          "Email verified successfully.",
-      });
+      const result = await verifyEmail(req.params.token);
+      return res.status(result.status).json(result.body);
     } catch (err) {
-      res.status(500).json({
-        error:
-          "Email verification failed",
-      });
+      return res.status(500).json({ success: false, error: { code: "VERIFICATION_FAILED", message: "We could not verify this email." } });
     }
   }
 );
@@ -364,85 +203,13 @@ router.get(
 
 router.post(
   "/resend-verification",
+  publicAuthRateLimit("verification-resend", { limit: 5, windowMs: 60 * 60 * 1000 }),
   async (req, res) => {
     try {
-      const { email } =
-        req.body;
-
-      if (!email) {
-        return res.status(400).json({
-          error: "Email is required.",
-        });
-      }
-
-      const user =
-        await User.findOne({
-          email:
-            email.toLowerCase(),
-        });
-
-      if (!user) {
-        return res.status(404).json({
-          error:
-            "User not found.",
-        });
-      }
-
-      const adminRoles = [
-  "super_admin",
-  "finance_admin",
-  "risk_admin",
-  "support_admin",
-  "auditor",
-];
-
-if (user.emailVerified) {
-  return res.status(400).json({
-    error: "Email is already verified.",
-  });
-}
-
-      const verificationToken =
-        crypto
-          .randomBytes(32)
-          .toString("hex");
-
-      const hashedVerificationToken =
-crypto
-.createHash("sha256")
-.update(verificationToken)
-.digest("hex");
-
-user.emailVerificationToken =
-hashedVerificationToken;
-
-      user.emailVerificationExpires =
-        new Date(
-          Date.now() +
-            24 *
-              60 *
-              60 *
-              1000
-        );
-
-      await user.save();
-
-      await sendVerificationEmail(
-        user,
-        verificationToken
-      );
-
-      res.json({
-        success: true,
-
-        message:
-          "Verification email sent successfully.",
-      });
+      const result = await resendVerification(req.body?.email);
+      return res.status(result.status).json(result.body);
     } catch (err) {
-      res.status(500).json({
-        error:
-          "Failed to resend verification email",
-      });
+      return res.status(200).json({ success: true, message: "If an eligible account exists, verification instructions will be sent." });
     }
   }
 );
@@ -454,43 +221,29 @@ hashedVerificationToken;
 
 router.post(
   "/forgot-password",
+  publicAuthRateLimit("forgot-password", { limit: 5, windowMs: 60 * 60 * 1000 }),
   async (req, res) => {
     try {
-      const { email } = req.body;
-
-      if (!email) {
-        return res.status(400).json({
-          error: "Email is required.",
-        });
-      }
+      const email = normalizeEmail(req.body?.email);
+      const generic = { success: true, message: "If an account exists, password reset instructions will be sent." };
+      if (!validateEmail(email)) return res.json(generic);
 
       const user =
         await User.findOne({
-          email:
-            email.toLowerCase(),
+          email,
+          role: { $in: ["merchant_owner", "merchant_staff"] },
         });
 
       // Do not reveal whether the email exists
       if (!user) {
-        return res.json({
-          message:
-            "If an account exists, a password reset email has been sent.",
-        });
+        return res.json(generic);
       }
 
       // ======================================
 // ACCOUNT LOCK CHECK
 // ======================================
 
-if (
-  user.lockedUntil &&
-  user.lockedUntil > new Date()
-) {
-  return res.status(423).json({
-    error:
-      "Account temporarily locked. Please try again later.",
-  });
-}
+if (user.lockedUntil && user.lockedUntil > new Date()) return res.json(generic);
 
       // ======================================
       // GENERATE RESET TOKEN
@@ -525,22 +278,14 @@ const hashedResetToken =
       // SEND EMAIL
       // ======================================
 
-      await sendPasswordResetEmail(
-        user,
-        resetToken
-      );
-
-      res.json({
-        success: true,
-
-        message:
-          "If an account exists, a password reset email has been sent.",
-      });
+      let delivered = true;
+      try { await sendPasswordResetEmail(user, resetToken); } catch { delivered = false; }
+      if (!delivered && process.env.NODE_ENV !== "production" && process.env.AURAPAY_EXPOSE_TEST_EMAIL_LINKS === "true") {
+        generic.developmentResetLink = require("../services/emailService").buildPublicLink(`/reset-password/${resetToken}`);
+      }
+      return res.json(generic);
     } catch (err) {
-      res.status(500).json({
-        error:
-          "Failed to send password reset email",
-      });
+      return res.json({ success: true, message: "If an account exists, password reset instructions will be sent." });
     }
   }
 );
@@ -594,19 +339,10 @@ router.post(
         });
       }
 
-      if (password.length < 8) {
-  return res.status(400).json({
-    error: "Password must be at least 8 characters long.",
-  });
-}
-
-const passwordRegex =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
-
-if (!passwordRegex.test(password)) {
+if (!PASSWORD_RE.test(password)) {
   return res.status(400).json({
     error:
-      "Password must contain at least one uppercase letter, one lowercase letter, and one number.",
+      "Password must be 10-128 characters and include uppercase, lowercase, and a number.",
   });
 }
 
