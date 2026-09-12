@@ -90,6 +90,13 @@ const transactionSchema = new mongoose.Schema(
       trim: true,
     },
 
+    apiRequestId: {
+      type: String,
+      default: "",
+      trim: true,
+      index: true,
+    },
+
     // ======================================
     // CUSTOMER
     // ======================================

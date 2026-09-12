@@ -9,6 +9,7 @@ const CheckoutSession = require("../../../models/CheckoutSession");
 const Settlement = require("../../../models/Settlement");
 const checkoutService = require("../../../services/checkoutService");
 const sandboxPaymentSimulationService = require("../../../services/sandboxPaymentSimulationService");
+const paymentInspectorService = require("../../../services/paymentInspectorService");
 
 const {
   failure,
@@ -180,6 +181,7 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
         description,
         scenario,
         idempotencyKey: req.headers["idempotency-key"],
+        requestId: req.requestId,
       });
 
       return {
@@ -217,6 +219,16 @@ router.get("/payments", requireApiPermission("payments:read"), async (req, res) 
     return sendSuccess(res, result.data, result.meta);
   } catch (err) {
     return sendFailure(res, 500, "internal_error", "Failed to load payments.");
+  }
+});
+
+router.get("/payments/:id/inspect", requireApiPermission("payments:read"), async (req, res) => {
+  try {
+    const inspection = await paymentInspectorService.inspect(req.merchant._id, req.params.id);
+    if (!inspection) return sendFailure(res, 404, "not_found", "Payment not found.");
+    return sendSuccess(res, inspection);
+  } catch (err) {
+    return sendFailure(res, 500, "internal_error", "Failed to inspect payment.");
   }
 });
 

@@ -283,6 +283,52 @@ test("sandbox insufficient funds and pending scenarios are deterministic", async
   createdIds.transactions.push(insufficient.body.data.id, pending.body.data.id);
 });
 
+test("Phase 6 payment inspector explains sandbox outcomes with tenant-safe evidence", async () => {
+  const scenarios = [
+    ["success", "completed", "Payment completed"],
+    ["declined", "failed", "Card declined"],
+    ["insufficient_funds", "failed", "Insufficient funds"],
+    ["pending", "pending", "Payment processing"],
+  ];
+
+  for (const [scenario, status, title] of scenarios) {
+    const created = await request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      requestId: `req_inspector_${scenario}`,
+      idempotencyKey: `inspector-${scenario}`,
+      body: { amount: 40, currency: "CAD", customerEmail: `${scenario}@example.com`, scenario },
+    });
+    assert.equal(created.status, 201);
+    createdIds.transactions.push(created.body.data.id);
+
+    const inspected = await request("GET", `/api/v1/payments/${created.body.data.id}/inspect`, { token: fullSecret });
+    assert.equal(inspected.status, 200);
+    assert.equal(inspected.body.data.payment.status, status);
+    assert.equal(inspected.body.data.summary.title, title);
+    assert.equal(inspected.body.data.payment.environment, "sandbox");
+    assert.deepEqual(inspected.body.data.timeline.map((step) => step.key), [
+      "request_received", "api_key_authenticated", "request_validated", "sandbox_simulation",
+      "authorization", "transaction_recorded", "settlement", "events", "webhooks",
+    ]);
+    assert.ok(inspected.body.data.events.count >= 1);
+    assert.equal(Boolean(inspected.body.data.settlement), scenario === "success");
+    assert.equal(inspected.body.data.financialImpact.chargedAmount, scenario === "success" ? 40 : 0);
+    assert.equal(inspected.body.data.developer.requestId, `req_inspector_${scenario}`);
+    assert.match(inspected.body.data.developer.idempotencyReference, /^idem_[a-f0-9]{12}$/);
+
+    const serialized = JSON.stringify(inspected.body).toLowerCase();
+    for (const forbidden of ["bearer ", "secretkeyhash", "webhook signing", "passwordhash", "verificationtoken", "resettoken", "refreshtoken", "sessiontoken", "stack trace"]) {
+      assert.equal(serialized.includes(forbidden), false, `response contained ${forbidden}`);
+    }
+
+    const isolated = await request("GET", `/api/v1/payments/${created.body.data.id}/inspect`, { token: otherSecret });
+    assert.equal(isolated.status, 404);
+  }
+
+  const missing = await request("GET", "/api/v1/payments/507f1f77bcf86cd799439011/inspect", { token: fullSecret });
+  assert.equal(missing.status, 404);
+});
+
 test("sandbox partial and full refunds update remaining refundable amount", async () => {
   const payment = await request("POST", "/api/v1/payments", {
     token: fullSecret,

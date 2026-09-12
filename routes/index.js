@@ -61,6 +61,9 @@ module.exports = function registerRoutes(app) {
   const merchantDeveloperRoutes =
     require("./merchantDeveloperRoutes");
 
+  const paymentInspectorRoutes =
+    require("./paymentInspectorRoutes");
+
   const auditRoutes =
     require("./auditRoutes");
 
@@ -155,6 +158,9 @@ app.use(
   "/api/merchant/developer",
   merchantDeveloperRoutes
 );
+
+app.use("/merchant/payment-inspector", paymentInspectorRoutes);
+app.use("/api/merchant/payment-inspector", paymentInspectorRoutes);
 
   // ======================================
   // CHECKOUTS

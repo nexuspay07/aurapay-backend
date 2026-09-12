@@ -139,6 +139,7 @@ class SandboxPaymentSimulationService {
     description = "",
     scenario = "success",
     idempotencyKey = "",
+    requestId = "",
   }) {
     const normalizedScenario = normalizeScenario(scenario);
     const outcome = SCENARIOS[normalizedScenario];
@@ -186,6 +187,7 @@ class SandboxPaymentSimulationService {
       livemode: false,
       sandboxScenario: normalizedScenario,
       idempotencyKey,
+      apiRequestId: requestId,
       confirmedAt: outcome.success ? new Date() : null,
       failedAt: outcome.status === "failed" ? new Date() : null,
     });
