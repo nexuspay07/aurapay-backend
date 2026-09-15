@@ -1,86 +1,18 @@
 const crypto = require("crypto");
 
 const CheckoutSession = require("../models/CheckoutSession");
-const Event = require("../models/Event");
 const Settlement = require("../models/Settlement");
 const Transaction = require("../models/Transaction");
 const eventService = require("./eventService");
-
-const SCENARIOS = {
-  success: {
-    status: "completed",
-    success: true,
-    code: "payment_completed",
-    message: "Sandbox payment completed.",
-  },
-  declined: {
-    status: "failed",
-    success: false,
-    code: "card_declined",
-    message: "Sandbox payment declined.",
-  },
-  insufficient_funds: {
-    status: "failed",
-    success: false,
-    code: "insufficient_funds",
-    message: "Sandbox payment failed due to insufficient funds.",
-  },
-  pending: {
-    status: "pending",
-    success: false,
-    code: "payment_processing",
-    message: "Sandbox payment is processing.",
-  },
-  failed: {
-    status: "failed",
-    success: false,
-    code: "payment_failed",
-    message: "Sandbox payment failed.",
-  },
-};
-
-const ALIASES = {
-  successful: "success",
-  succeed: "success",
-  approved: "success",
-  decline: "declined",
-  card_declined: "declined",
-  insufficient: "insufficient_funds",
-  processing: "pending",
-  generic_failed: "failed",
-  generic_failure: "failed",
-};
+const paymentOrchestrationService = require("./paymentOrchestrationService");
+const { SCENARIOS } = require("./providers/sandboxPaymentProvider");
 
 function id(prefix) {
   return `${prefix}_${crypto.randomBytes(10).toString("hex")}`;
 }
 
-function normalizeScenario(value) {
-  const key = String(value || "success").trim().toLowerCase();
-  return SCENARIOS[key] ? key : ALIASES[key] || "success";
-}
-
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
-}
-
-function calculateFees(amount) {
-  const rate = Number(process.env.SANDBOX_FEE_RATE || 0.029);
-  const fixed = Number(process.env.SANDBOX_FEE_FIXED || 0.3);
-  const grossAmount = roundMoney(amount);
-  const aurapayFee = roundMoney(grossAmount * rate + fixed);
-  const netAmount = roundMoney(Math.max(0, grossAmount - aurapayFee));
-
-  return {
-    grossAmount,
-    aurapayFee,
-    netAmount,
-    policy: {
-      rate,
-      fixed,
-      environment: "sandbox",
-    },
-  };
 }
 
 async function publish(eventType, resourceType, resourceId, merchant, payload) {
@@ -103,7 +35,7 @@ class SandboxPaymentSimulationService {
   }
 
   calculateFees(amount) {
-    return calculateFees(amount);
+    return paymentOrchestrationService.calculateFees(amount);
   }
 
   async createCheckout(merchant, data) {
@@ -141,146 +73,10 @@ class SandboxPaymentSimulationService {
     idempotencyKey = "",
     requestId = "",
   }) {
-    const normalizedScenario = normalizeScenario(scenario);
-    const outcome = SCENARIOS[normalizedScenario];
-    const paymentId = id("pay_test");
-    const transactionId = id("txn_test");
-    const fees = outcome.success
-      ? calculateFees(amount)
-      : {
-          grossAmount: roundMoney(amount),
-          aurapayFee: 0,
-          netAmount: 0,
-          policy: {
-            rate: Number(process.env.SANDBOX_FEE_RATE || 0.029),
-            fixed: Number(process.env.SANDBOX_FEE_FIXED || 0.3),
-            environment: "sandbox",
-          },
-        };
-
-    const transaction = await Transaction.create({
-      merchant,
-      checkoutSession: checkoutSession?._id || checkoutSession || null,
-      amount: fees.grossAmount,
-      currency: String(currency || "USD").toLowerCase(),
-      customerEmail,
-      provider: "Test",
-      paymentType: "test",
-      transactionId,
-      providerPaymentId: paymentId,
-      status: outcome.status,
-      success: outcome.success,
-      errorMessage: outcome.success ? null : outcome.message,
-      rawProviderResponse: {
-        provider: "AuraPay Sandbox Simulator",
-        scenario: normalizedScenario,
-        code: outcome.code,
-        livemode: false,
-      },
-      merchantFee: fees.aurapayFee,
-      platformFee: fees.aurapayFee,
-      merchantNet: fees.netAmount,
-      estimatedFee: fees.aurapayFee,
-      estimatedNet: fees.netAmount,
-      estimatedProfit: fees.aurapayFee,
-      environment: "sandbox",
-      livemode: false,
-      sandboxScenario: normalizedScenario,
-      idempotencyKey,
-      apiRequestId: requestId,
-      confirmedAt: outcome.success ? new Date() : null,
-      failedAt: outcome.status === "failed" ? new Date() : null,
+    return paymentOrchestrationService.createPayment({
+      merchant, checkoutSession, amount, currency, customerEmail, description,
+      scenario, idempotencyKey, requestId,
     });
-
-    await publish("payment.created", "transaction", transaction._id, merchant, {
-      paymentId,
-      transactionId,
-      amount: transaction.amount,
-      currency: transaction.currency,
-      status: transaction.status,
-      scenario: normalizedScenario,
-    });
-
-    let settlement = null;
-    if (outcome.success) {
-      settlement = await Settlement.create({
-        merchant,
-        transaction: transaction._id,
-        amount: fees.grossAmount,
-        netAmount: fees.netAmount,
-        currency: transaction.currency,
-        transactionCount: 1,
-        refundAmount: 0,
-        refundCount: 0,
-        outstandingAmount: fees.netAmount,
-        status: "pending",
-        environment: "sandbox",
-        livemode: false,
-      });
-
-      transaction.settlement = settlement._id;
-      transaction.settled = false;
-      await transaction.save();
-
-      await publish("payment.completed", "transaction", transaction._id, merchant, {
-        paymentId,
-        transactionId,
-        amount: transaction.amount,
-        currency: transaction.currency,
-        fees: fees.aurapayFee,
-        netAmount: fees.netAmount,
-      });
-
-      await publish("settlement.created", "settlement", settlement._id, merchant, {
-        settlementId: settlement._id,
-        transactionId: transaction._id,
-        grossAmount: settlement.amount,
-        netAmount: settlement.netAmount,
-        currency: settlement.currency,
-        status: settlement.status,
-      });
-    } else if (outcome.status === "failed") {
-      await publish("payment.failed", "transaction", transaction._id, merchant, {
-        paymentId,
-        transactionId,
-        amount: transaction.amount,
-        currency: transaction.currency,
-        failureCode: outcome.code,
-        failureMessage: outcome.message,
-      });
-    }
-
-    if (checkoutSession) {
-      const nextStatus = outcome.success
-        ? "paid"
-        : outcome.status === "pending"
-        ? "pending"
-        : "failed";
-
-      checkoutSession.status = nextStatus;
-      checkoutSession.paidAt = outcome.success ? new Date() : null;
-      checkoutSession.stripePaymentIntentId = paymentId;
-      checkoutSession.environment = "sandbox";
-      checkoutSession.provider = "AuraPay Sandbox";
-      await checkoutSession.save();
-
-      if (outcome.success) {
-        await publish("checkout.paid", "checkout", checkoutSession._id, merchant, {
-          checkoutId: checkoutSession.sessionId,
-          paymentId,
-          transactionId: transaction._id,
-          amount: checkoutSession.amount,
-          currency: checkoutSession.currency,
-        });
-      }
-    }
-
-    return {
-      transaction,
-      settlement,
-      scenario: normalizedScenario,
-      outcome,
-    };
   }
 
   async simulateCheckoutPayment(sessionId, scenario) {

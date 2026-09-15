@@ -20,6 +20,7 @@ const Transaction = require("../models/Transaction");
 const User = require("../models/User");
 const WebhookDelivery = require("../models/WebhookDelivery");
 const apiKeyService = require("../services/apiKeyService");
+const { providerRegistry, SANDBOX_PROVIDER_ID } = require("../services/providers/providerRegistry");
 const { createSandboxApiKey, createVerifiedMerchantAccount } = require("./helpers/merchantFixtures");
 
 let server;
@@ -414,7 +415,7 @@ test("invalid amount returns 400", async () => {
   assert.equal(res.status, 400);
 });
 
-test("idempotent replay returns original response", async () => {
+test("payment idempotent replay and conflict do not execute the provider again", async () => {
   const options = {
     token: fullSecret,
     idempotencyKey: "payment-idempotent",
@@ -423,12 +424,32 @@ test("idempotent replay returns original response", async () => {
       currency: "USD",
     },
   };
-  const first = await request("POST", "/api/v1/payments", options);
-  const second = await request("POST", "/api/v1/payments", options);
+  const provider = providerRegistry.resolve(SANDBOX_PROVIDER_ID);
+  const executePayment = provider.executePayment;
+  let executions = 0;
+  provider.executePayment = async (...args) => {
+    executions += 1;
+    return executePayment.apply(provider, args);
+  };
 
-  assert.equal(first.status, 201);
-  assert.equal(second.status, 201);
-  assert.equal(first.body.data.id, second.body.data.id);
+  try {
+    const first = await request("POST", "/api/v1/payments", options);
+    const replay = await request("POST", "/api/v1/payments", options);
+    const conflict = await request("POST", "/api/v1/payments", {
+      ...options,
+      body: { ...options.body, amount: 16 },
+    });
+
+    assert.equal(first.status, 201);
+    assert.equal(replay.status, 201);
+    assert.equal(first.body.data.id, replay.body.data.id);
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error.code, "idempotency_conflict");
+    assert.equal(executions, 1);
+    createdIds.transactions.push(first.body.data.id);
+  } finally {
+    provider.executePayment = executePayment;
+  }
 });
 
 test("idempotency payload conflict returns 409", async () => {

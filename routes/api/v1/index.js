@@ -8,6 +8,7 @@ const Transaction = require("../../../models/Transaction");
 const CheckoutSession = require("../../../models/CheckoutSession");
 const Settlement = require("../../../models/Settlement");
 const checkoutService = require("../../../services/checkoutService");
+const paymentOrchestrationService = require("../../../services/paymentOrchestrationService");
 const sandboxPaymentSimulationService = require("../../../services/sandboxPaymentSimulationService");
 const paymentInspectorService = require("../../../services/paymentInspectorService");
 
@@ -173,7 +174,7 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
     }
 
     return await withIdempotency(req, res, "POST /api/v1/payments", async () => {
-      const result = await sandboxPaymentSimulationService.simulatePayment({
+      const result = await paymentOrchestrationService.createPayment({
         merchant: req.merchant._id,
         amount: Number(amount),
         currency: String(currency).toUpperCase(),
