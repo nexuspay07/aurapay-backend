@@ -199,6 +199,49 @@ test("successful API request creates payment and propagates request ID", async (
   createdIds.transactions.push(res.body.data.id);
 });
 
+test("payment provider selection defaults safely and supports approved sandbox adapters", async () => {
+  const cases = [
+    ["provider-default", undefined, "aurapay_sandbox", "success", "completed"],
+    ["provider-aurapay", "aurapay_sandbox", "aurapay_sandbox", "success", "completed"],
+    ["provider-stripe", "stripe_sandbox", "stripe_sandbox", "declined", "failed"],
+    ["provider-paypal", "paypal_sandbox", "paypal_sandbox", "pending", "pending"],
+  ];
+
+  for (const [idempotencyKey, provider, expectedProvider, scenario, status] of cases) {
+    const body = { amount: 25, currency: "CAD", scenario };
+    if (provider) body.provider = provider;
+
+    const res = await request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      idempotencyKey,
+      body,
+    });
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.data.provider, "Test");
+    assert.equal(res.body.data.environment, "sandbox");
+    assert.equal(res.body.data.livemode, false);
+    assert.equal(res.body.data.status, status);
+
+    const transaction = await Transaction.findById(res.body.data.id);
+    assert.equal(transaction.rawProviderResponse.provider, expectedProvider);
+    createdIds.transactions.push(res.body.data.id);
+  }
+});
+
+test("unapproved and real provider names fail as client errors", async () => {
+  for (const provider of ["stripe", "paypal", "unknown_provider"]) {
+    const res = await request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      idempotencyKey: `unsupported-${provider}`,
+      body: { amount: 25, currency: "CAD", provider },
+    });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "unsupported_provider");
+  }
+});
+
 test("successful sandbox payment creates settlement and webhook delivery records", async () => {
   const res = await request("POST", "/api/v1/payments", {
     token: fullSecret,
@@ -445,6 +488,45 @@ test("payment idempotent replay and conflict do not execute the provider again",
     assert.equal(first.body.data.id, replay.body.data.id);
     assert.equal(conflict.status, 409);
     assert.equal(conflict.body.error.code, "idempotency_conflict");
+    assert.equal(executions, 1);
+    createdIds.transactions.push(first.body.data.id);
+  } finally {
+    provider.executePayment = executePayment;
+  }
+});
+
+test("payment idempotency replays equivalent default selection and conflicts on provider changes", async () => {
+  const idempotencyKey = "payment-provider-idempotent";
+  const provider = providerRegistry.resolve(SANDBOX_PROVIDER_ID);
+  const executePayment = provider.executePayment;
+  let executions = 0;
+  provider.executePayment = async (...args) => {
+    executions += 1;
+    return executePayment.apply(provider, args);
+  };
+
+  try {
+    const first = await request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 17, currency: "USD" },
+    });
+    const equivalentReplay = await request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 17, currency: "USD", provider: "aurapay_sandbox" },
+    });
+    const providerConflict = await request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 17, currency: "USD", provider: "stripe_sandbox" },
+    });
+
+    assert.equal(first.status, 201);
+    assert.equal(equivalentReplay.status, 201);
+    assert.equal(first.body.data.id, equivalentReplay.body.data.id);
+    assert.equal(providerConflict.status, 409);
+    assert.equal(providerConflict.body.error.code, "idempotency_conflict");
     assert.equal(executions, 1);
     createdIds.transactions.push(first.body.data.id);
   } finally {

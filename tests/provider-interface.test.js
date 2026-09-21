@@ -2,8 +2,14 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { InvalidProviderResultError, assertPaymentProvider, normalizeProviderResult } = require("../services/providers/providerContract");
-const { ProviderRegistry, UnsupportedProviderError } = require("../services/providers/providerRegistry");
+const {
+  ProviderRegistry,
+  UnsupportedProviderError,
+  providerRegistry,
+} = require("../services/providers/providerRegistry");
 const { sandboxPaymentProvider } = require("../services/providers/sandboxPaymentProvider");
+const { stripeSandboxPaymentProvider } = require("../services/providers/stripeSandboxPaymentProvider");
+const { paypalSandboxPaymentProvider } = require("../services/providers/paypalSandboxPaymentProvider");
 
 test("payment provider contract requires an id and executePayment operation", () => {
   assert.throws(() => assertPaymentProvider({ id: "missing-operation" }), /executePayment/);
@@ -56,4 +62,64 @@ test("registry resolves only explicitly registered providers", () => {
   assert.equal(registry.resolve("aurapay_sandbox"), sandboxPaymentProvider);
   assert.throws(() => registry.resolve("stripe"), UnsupportedProviderError);
   assert.throws(() => registry.resolve("paypal"), UnsupportedProviderError);
+});
+
+test("Stripe sandbox adapter satisfies the normalized sandbox provider contract", async () => {
+  assert.equal(assertPaymentProvider(stripeSandboxPaymentProvider), stripeSandboxPaymentProvider);
+
+  const raw = await stripeSandboxPaymentProvider.executePayment({
+    amount: 25.55,
+    currency: "cad",
+    scenario: "success",
+  });
+
+  const result = normalizeProviderResult(raw);
+
+  assert.equal(result.provider, "stripe_sandbox");
+  assert.match(result.providerPaymentId, /^pay_stripe_test_[a-f0-9]{20}$/);
+  assert.equal(result.status, "completed");
+  assert.equal(result.success, true);
+  assert.equal(result.outcome.code, "payment_completed");
+  assert.equal(result.amount, 25.55);
+  assert.equal(result.currency, "CAD");
+  assert.equal(result.environment, "sandbox");
+  assert.equal(result.livemode, false);
+  assert.deepEqual(result.metadata, { scenario: "success" });
+});
+
+test("PayPal sandbox adapter satisfies the normalized sandbox provider contract", async () => {
+  assert.equal(assertPaymentProvider(paypalSandboxPaymentProvider), paypalSandboxPaymentProvider);
+
+  const raw = await paypalSandboxPaymentProvider.executePayment({
+    amount: 25.55,
+    currency: "cad",
+    scenario: "success",
+  });
+
+  const result = normalizeProviderResult(raw);
+
+  assert.equal(result.provider, "paypal_sandbox");
+  assert.match(result.providerPaymentId, /^pay_paypal_test_[a-f0-9]{20}$/);
+  assert.equal(result.status, "completed");
+  assert.equal(result.success, true);
+  assert.equal(result.outcome.code, "payment_completed");
+  assert.equal(result.amount, 25.55);
+  assert.equal(result.currency, "CAD");
+  assert.equal(result.environment, "sandbox");
+  assert.equal(result.livemode, false);
+  assert.deepEqual(result.metadata, { scenario: "success" });
+});
+
+test("Phase 8 registry exposes only approved sandbox payment providers", () => {
+  const aurapay = providerRegistry.resolve("aurapay_sandbox");
+  const stripeSandbox = providerRegistry.resolve("stripe_sandbox");
+  const paypalSandbox = providerRegistry.resolve("paypal_sandbox");
+
+  assert.equal(aurapay.id, "aurapay_sandbox");
+  assert.equal(stripeSandbox.id, "stripe_sandbox");
+  assert.equal(paypalSandbox.id, "paypal_sandbox");
+
+  assert.throws(() => providerRegistry.resolve("stripe"), UnsupportedProviderError);
+  assert.throws(() => providerRegistry.resolve("paypal"), UnsupportedProviderError);
+  assert.throws(() => providerRegistry.resolve("unknown"), UnsupportedProviderError);
 });

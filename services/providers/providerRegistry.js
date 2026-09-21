@@ -1,5 +1,7 @@
 const { assertPaymentProvider } = require("./providerContract");
 const { sandboxPaymentProvider } = require("./sandboxPaymentProvider");
+const { stripeSandboxPaymentProvider } = require("./stripeSandboxPaymentProvider");
+const { paypalSandboxPaymentProvider } = require("./paypalSandboxPaymentProvider");
 
 class UnsupportedProviderError extends Error {
   constructor(providerId) {
@@ -24,6 +26,10 @@ class ProviderRegistry {
 }
 
 const SANDBOX_PROVIDER_ID = "aurapay_sandbox";
-const providerRegistry = new ProviderRegistry([sandboxPaymentProvider]);
+const providerRegistry = new ProviderRegistry([
+  sandboxPaymentProvider,
+  stripeSandboxPaymentProvider,
+  paypalSandboxPaymentProvider,
+]);
 
 module.exports = { ProviderRegistry, SANDBOX_PROVIDER_ID, UnsupportedProviderError, providerRegistry };

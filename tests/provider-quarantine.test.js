@@ -36,6 +36,11 @@ const providerModules = [
   "services/providerRefundService.js",
 ].map((file) => path.normalize(path.resolve(__dirname, "..", file)));
 
+const sandboxAdapterModules = [
+  "services/providers/stripeSandboxPaymentProvider.js",
+  "services/providers/paypalSandboxPaymentProvider.js",
+].map((file) => path.normalize(path.resolve(__dirname, "..", file)));
+
 let server;
 let baseUrl;
 
@@ -61,6 +66,17 @@ test("public beta does not initialize provider or legacy payment modules", () =>
       false,
       `${path.relative(process.cwd(), providerModule)} must not be initialized`
     );
+  }
+});
+
+test("multi-provider sandbox adapters initialize without loading quarantined providers", () => {
+  const loadedModules = new Set(Object.keys(require.cache).map(path.normalize));
+
+  for (const sandboxAdapterModule of sandboxAdapterModules) {
+    assert.equal(loadedModules.has(sandboxAdapterModule), true);
+  }
+  for (const providerModule of providerModules) {
+    assert.equal(loadedModules.has(providerModule), false);
   }
 });
 
