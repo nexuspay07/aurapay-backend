@@ -185,6 +185,26 @@ const transactionSchema = new mongoose.Schema(
       default: null,
     },
 
+    routing: {
+      mode: {
+        type: String,
+        enum: ["explicit", "auto"],
+      },
+      requestedProvider: {
+        type: String,
+      },
+      selectedProvider: {
+        type: String,
+        enum: ["aurapay_sandbox", "stripe_sandbox", "paypal_sandbox"],
+      },
+      policy: {
+        type: String,
+      },
+      reason: {
+        type: String,
+      },
+    },
+
     // ======================================
     // ROUTING
     // ======================================

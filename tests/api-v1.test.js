@@ -222,9 +222,49 @@ test("payment provider selection defaults safely and supports approved sandbox a
     assert.equal(res.body.data.environment, "sandbox");
     assert.equal(res.body.data.livemode, false);
     assert.equal(res.body.data.status, status);
+    assert.deepEqual(res.body.meta.routing, {
+      mode: "explicit",
+      requestedProvider: expectedProvider,
+      selectedProvider: expectedProvider,
+      policy: "explicit_v1",
+      reason: "explicit_provider",
+    });
 
     const transaction = await Transaction.findById(res.body.data.id);
     assert.equal(transaction.rawProviderResponse.provider, expectedProvider);
+    assert.equal(transaction.routing.selectedProvider, expectedProvider);
+    createdIds.transactions.push(res.body.data.id);
+  }
+});
+
+test("auto provider uses deterministic sandbox demonstration routing", async () => {
+  const cases = [
+    ["auto-cad", "CAD", "aurapay_sandbox", "sandbox_demo_cad"],
+    ["auto-usd", "USD", "stripe_sandbox", "sandbox_demo_usd"],
+    ["auto-eur", "EUR", "paypal_sandbox", "sandbox_demo_fallback"],
+  ];
+
+  for (const [idempotencyKey, currency, selectedProvider, reason] of cases) {
+    const res = await request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 26, currency, provider: "auto" },
+    });
+
+    assert.equal(res.status, 201);
+    assert.deepEqual(res.body.meta.routing, {
+      mode: "auto",
+      requestedProvider: "auto",
+      selectedProvider,
+      policy: "sandbox_demo_v1",
+      reason,
+    });
+    assert.equal(JSON.stringify(res.body.meta.routing).includes("credential"), false);
+    assert.equal(JSON.stringify(res.body.meta.routing).includes("payload"), false);
+
+    const transaction = await Transaction.findById(res.body.data.id);
+    assert.equal(transaction.routing.selectedProvider, selectedProvider);
+    assert.equal(transaction.rawProviderResponse.provider, selectedProvider);
     createdIds.transactions.push(res.body.data.id);
   }
 });
@@ -532,6 +572,63 @@ test("payment idempotency replays equivalent default selection and conflicts on 
   } finally {
     provider.executePayment = executePayment;
   }
+});
+
+test("auto idempotency replays before rerouting and conflicts on changed routing intent", async () => {
+  const idempotencyKey = "payment-auto-idempotent";
+  const selectedProvider = providerRegistry.resolve("stripe_sandbox");
+  const executePayment = selectedProvider.executePayment;
+  let executions = 0;
+  selectedProvider.executePayment = async (...args) => {
+    executions += 1;
+    return executePayment.apply(selectedProvider, args);
+  };
+
+  try {
+    const options = {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 27, currency: "USD", scenario: "success", provider: "auto" },
+    };
+    const first = await request("POST", "/api/v1/payments", options);
+    const replay = await request("POST", "/api/v1/payments", options);
+    const explicitConflict = await request("POST", "/api/v1/payments", {
+      ...options,
+      body: { ...options.body, provider: "stripe_sandbox" },
+    });
+    const changedCurrencyConflict = await request("POST", "/api/v1/payments", {
+      ...options,
+      body: { ...options.body, currency: "CAD" },
+    });
+
+    assert.equal(first.status, 201);
+    assert.equal(replay.status, 201);
+    assert.equal(first.body.data.id, replay.body.data.id);
+    assert.equal(explicitConflict.status, 409);
+    assert.equal(changedCurrencyConflict.status, 409);
+    assert.equal(executions, 1);
+    createdIds.transactions.push(first.body.data.id);
+  } finally {
+    selectedProvider.executePayment = executePayment;
+  }
+});
+
+test("omitted and auto routing intents conflict under one idempotency key", async () => {
+  const options = {
+    token: fullSecret,
+    idempotencyKey: "payment-omitted-auto-conflict",
+    body: { amount: 28, currency: "CAD" },
+  };
+  const first = await request("POST", "/api/v1/payments", options);
+  const conflict = await request("POST", "/api/v1/payments", {
+    ...options,
+    body: { ...options.body, provider: "auto" },
+  });
+
+  assert.equal(first.status, 201);
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.body.error.code, "idempotency_conflict");
+  createdIds.transactions.push(first.body.data.id);
 });
 
 test("idempotency payload conflict returns 409", async () => {

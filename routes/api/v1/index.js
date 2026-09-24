@@ -14,7 +14,6 @@ const paymentInspectorService = require("../../../services/paymentInspectorServi
 const {
   SANDBOX_PROVIDER_ID,
   UnsupportedProviderError,
-  providerRegistry,
 } = require("../../../services/providers/providerRegistry");
 
 const {
@@ -185,15 +184,6 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
       return sendFailure(res, 400, "invalid_request", "Customer email is invalid.");
     }
 
-    try {
-      providerRegistry.resolve(provider);
-    } catch (err) {
-      if (err instanceof UnsupportedProviderError) {
-        return sendFailure(res, 400, "unsupported_provider", err.message);
-      }
-      throw err;
-    }
-
     // Canonicalize the default so omitted and explicit default selections have
     // the same idempotency fingerprint while different providers conflict.
     req.body.provider = provider;
@@ -220,11 +210,15 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
             scenario: result.scenario,
             outcome: result.outcome.code,
             settlementId: result.settlement?._id || null,
+            routing: result.routing,
           },
         },
       };
     });
   } catch (err) {
+    if (err instanceof UnsupportedProviderError) {
+      return sendFailure(res, 400, "unsupported_provider", err.message);
+    }
     return sendFailure(res, 500, "internal_error", "Failed to create payment.");
   }
 });

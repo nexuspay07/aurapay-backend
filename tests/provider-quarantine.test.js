@@ -41,6 +41,10 @@ const sandboxAdapterModules = [
   "services/providers/paypalSandboxPaymentProvider.js",
 ].map((file) => path.normalize(path.resolve(__dirname, "..", file)));
 
+const routingModule = path.normalize(
+  path.resolve(__dirname, "..", "services/providerRoutingService.js")
+);
+
 let server;
 let baseUrl;
 
@@ -75,6 +79,15 @@ test("multi-provider sandbox adapters initialize without loading quarantined pro
   for (const sandboxAdapterModule of sandboxAdapterModules) {
     assert.equal(loadedModules.has(sandboxAdapterModule), true);
   }
+  for (const providerModule of providerModules) {
+    assert.equal(loadedModules.has(providerModule), false);
+  }
+});
+
+test("provider routing initializes without loading quarantined providers", () => {
+  const loadedModules = new Set(Object.keys(require.cache).map(path.normalize));
+  assert.equal(loadedModules.has(routingModule), true);
+
   for (const providerModule of providerModules) {
     assert.equal(loadedModules.has(providerModule), false);
   }

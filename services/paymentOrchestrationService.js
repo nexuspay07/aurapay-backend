@@ -5,6 +5,7 @@ const Transaction = require("../models/Transaction");
 const eventService = require("./eventService");
 const { normalizeProviderResult } = require("./providers/providerContract");
 const { SANDBOX_PROVIDER_ID, providerRegistry } = require("./providers/providerRegistry");
+const { ProviderRoutingService } = require("./providerRoutingService");
 
 function id(prefix) {
   return `${prefix}_${crypto.randomBytes(10).toString("hex")}`;
@@ -27,8 +28,9 @@ async function publish(eventType, resourceType, resourceId, merchant, payload) {
 }
 
 class PaymentOrchestrationService {
-  constructor(registry = providerRegistry) {
+  constructor(registry = providerRegistry, routingService = new ProviderRoutingService(registry)) {
     this.registry = registry;
+    this.routingService = routingService;
   }
 
   calculateFees(amount) {
@@ -36,7 +38,8 @@ class PaymentOrchestrationService {
   }
 
   async createPayment({ providerId = SANDBOX_PROVIDER_ID, merchant, checkoutSession = null, amount, currency, customerEmail = "", scenario = "success", idempotencyKey = "", requestId = "" }) {
-    const adapter = this.registry.resolve(providerId);
+    const routing = this.routingService.route({ requestedProvider: providerId, currency });
+    const adapter = this.registry.resolve(routing.selectedProvider);
     const providerResult = normalizeProviderResult(await adapter.executePayment({ amount, currency, scenario }));
     if (providerResult.provider !== adapter.id) {
       throw new Error(`Provider result identity mismatch for ${adapter.id}.`);
@@ -65,6 +68,7 @@ class PaymentOrchestrationService {
         code: providerResult.outcome.code,
         livemode: providerResult.livemode,
       },
+      routing,
       merchantFee: fees.aurapayFee,
       platformFee: fees.aurapayFee,
       merchantNet: fees.netAmount,
@@ -133,6 +137,7 @@ class PaymentOrchestrationService {
       scenario: sandboxScenario,
       outcome: { status: providerResult.status, success: providerResult.success, ...providerResult.outcome },
       providerResult,
+      routing,
     };
   }
 }
