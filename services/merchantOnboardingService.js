@@ -41,7 +41,7 @@ async function registerMerchant(body, options = {}) {
   try { await (options.sendVerificationEmail || emailService.sendVerificationEmail)(owner, rawToken); }
   catch { delivered = false; }
   const bodyOut = { success: true, data: { merchantId: merchant._id, ownerEmail: owner.email, verificationRequired: true, emailDelivery: delivered ? "sent" : "pending" }, message: delivered ? "Check your email to verify your AuraPay Sandbox account." : "Your account was created, but we couldn't send the verification email. Try sending it again." };
-  if (!delivered && process.env.NODE_ENV !== "production" && process.env.AURAPAY_EXPOSE_TEST_EMAIL_LINKS === "true") bodyOut.data.developmentVerificationLink = emailService.buildPublicLink(`/verify-email/${rawToken}`);
+  if (!delivered && emailService.shouldExposeDevelopmentLinks()) bodyOut.data.developmentVerificationLink = emailService.buildPublicLink(`/verify-email/${rawToken}`);
   return { status: 201, body: bodyOut, merchant, owner, rawToken };
 }
 
@@ -56,14 +56,28 @@ async function resendVerification(email, options = {}) {
   const normalized = normalizeEmail(email);
   const user = normalized ? await User.findOne({ email: normalized, role: "merchant_owner", emailVerified: false, frozen: { $ne: true } }).select("+emailVerificationToken") : null;
   if (!user) return { status: 200, body: { success: true, message: genericResendMessage } };
+  const previousToken = user.emailVerificationToken;
+  const previousExpires = user.emailVerificationExpires;
   const rawToken = newToken();
-  user.emailVerificationToken = tokenHash(rawToken);
+  const nextToken = tokenHash(rawToken);
+  user.emailVerificationToken = nextToken;
   user.emailVerificationExpires = new Date(Date.now() + VERIFICATION_TTL_MS);
   await user.save();
   let delivered = true;
-  try { await (options.sendVerificationEmail || emailService.sendVerificationEmail)(user, rawToken); } catch { delivered = false; }
+  let developmentLinkEnabled = false;
+  try { await (options.sendVerificationEmail || emailService.sendVerificationEmail)(user, rawToken); }
+  catch {
+    delivered = false;
+    developmentLinkEnabled = emailService.shouldExposeDevelopmentLinks();
+    if (!developmentLinkEnabled) {
+      await User.updateOne(
+        { _id: user._id, emailVerificationToken: nextToken },
+        { $set: { emailVerificationToken: previousToken, emailVerificationExpires: previousExpires } }
+      );
+    }
+  }
   const body = { success: true, message: genericResendMessage };
-  if (!delivered && process.env.NODE_ENV !== "production" && process.env.AURAPAY_EXPOSE_TEST_EMAIL_LINKS === "true") body.developmentVerificationLink = emailService.buildPublicLink(`/verify-email/${rawToken}`);
+  if (!delivered && developmentLinkEnabled) body.developmentVerificationLink = emailService.buildPublicLink(`/verify-email/${rawToken}`);
   return { status: 200, body, rawToken };
 }
 

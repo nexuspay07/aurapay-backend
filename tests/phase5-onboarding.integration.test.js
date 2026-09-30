@@ -53,8 +53,30 @@ test("case-insensitive duplicate registration creates no duplicate", async () =>
 
 test("verification tokens are single-use and expired or random tokens fail", async () => {
   const valid = track(await registerMerchant(payload("verify"), { sendVerificationEmail: async () => ({ id: "mock" }) }));
-  assert.equal((await request("GET", `/auth/verify-email/${valid.rawToken}`)).status, 200); assert.equal((await request("GET", `/auth/verify-email/${valid.rawToken}`)).status, 400); assert.equal((await request("GET", "/auth/verify-email/random-token")).status, 400);
-  const expired = track(await registerMerchant(payload("expired"), { sendVerificationEmail: async () => ({ id: "mock" }) })); await User.updateOne({ _id: expired.owner._id }, { emailVerificationExpires: new Date(Date.now() - 1000) }); assert.equal((await request("GET", `/auth/verify-email/${expired.rawToken}`)).status, 400);
+  assert.equal((await request("POST", `/auth/verify-email/${valid.rawToken}`)).status, 200); assert.equal((await request("POST", `/auth/verify-email/${valid.rawToken}`)).status, 400); assert.equal((await request("POST", "/auth/verify-email/random-token")).status, 400);
+  const expired = track(await registerMerchant(payload("expired"), { sendVerificationEmail: async () => ({ id: "mock" }) })); await User.updateOne({ _id: expired.owner._id }, { emailVerificationExpires: new Date(Date.now() - 1000) }); assert.equal((await request("POST", `/auth/verify-email/${expired.rawToken}`)).status, 400);
+});
+
+test("unverified merchant login returns stable verification guidance", async () => {
+  const account = track(await registerMerchant(payload("unverified-login"), { sendVerificationEmail: async () => ({ id: "mock" }) }));
+  const response = await request("POST", "/auth/login", { email: account.owner.email, password: "PhaseFive123!" });
+  assert.equal(response.status, 403); assert.equal(response.body.error.code, "EMAIL_NOT_VERIFIED");
+});
+
+test("failed replacement delivery preserves prior verification and reset tokens", async () => {
+  const account = track(await registerMerchant(payload("replacement-failure"), { sendVerificationEmail: async () => ({ id: "mock" }) }));
+  const beforeVerification = await User.findById(account.owner._id).select("+emailVerificationToken");
+  await resendVerification(account.owner.email, { sendVerificationEmail: async () => { throw new Error("mock outage"); } });
+  const afterVerification = await User.findById(account.owner._id).select("+emailVerificationToken");
+  assert.equal(afterVerification.emailVerificationToken, beforeVerification.emailVerificationToken);
+
+  const priorReset = tokenHash("prior-reset-token");
+  const priorExpiry = new Date(Date.now() + 60000);
+  await User.updateOne({ _id: account.owner._id }, { passwordResetToken: priorReset, passwordResetExpires: priorExpiry });
+  await request("POST", "/auth/forgot-password", { email: account.owner.email });
+  const afterReset = await User.findById(account.owner._id).select("+passwordResetToken");
+  assert.equal(afterReset.passwordResetToken, priorReset);
+  assert.equal(afterReset.passwordResetExpires.getTime(), priorExpiry.getTime());
 });
 
 test("merchant password reset tokens are expiring and single-use and replace the old password", async () => {

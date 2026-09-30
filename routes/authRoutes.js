@@ -18,6 +18,7 @@ const { createAccessToken } =
 
 const {
   sendPasswordResetEmail,
+  shouldExposeDevelopmentLinks,
 } = require("../services/emailService");
 const { normalizeEmail, validateEmail, PASSWORD_RE } = require("../services/publicAccountInput");
 const { resendVerification, verifyEmail } = require("../services/merchantOnboardingService");
@@ -111,6 +112,20 @@ router.post(
         const merchant = user.merchantId
           ? await Merchant.findById(user.merchantId)
           : null;
+        const accountOtherwiseEligible = Boolean(
+          merchant &&
+          user.merchantId &&
+          String(user.merchantId) === String(merchant._id) &&
+          user.frozen !== true &&
+          (!user.lockedUntil || user.lockedUntil <= new Date()) &&
+          merchant.active !== false
+        );
+        if (accountOtherwiseEligible && (!user.emailVerified || user.status === "unverified")) {
+          return res.status(403).json({
+            success: false,
+            error: { code: "EMAIL_NOT_VERIFIED", message: "Please verify your email before logging in." },
+          });
+        }
         if (!canMerchantAuthenticate(user, merchant)) {
           return res.status(401).json({ error: "Invalid email or password." });
         }
@@ -185,7 +200,7 @@ res.json({
 // VERIFY EMAIL
 // ======================================
 
-router.get(
+router.post(
   "/verify-email/:token",
   async (req, res) => {
     try {
@@ -232,7 +247,7 @@ router.post(
         await User.findOne({
           email,
           role: { $in: ["merchant_owner", "merchant_staff"] },
-        });
+        }).select("+passwordResetToken");
 
       // Do not reveal whether the email exists
       if (!user) {
@@ -250,6 +265,8 @@ if (user.lockedUntil && user.lockedUntil > new Date()) return res.json(generic);
       // ======================================
 
      
+ const previousResetToken = user.passwordResetToken;
+ const previousResetExpires = user.passwordResetExpires;
  const resetToken =
   crypto
     .randomBytes(32)
@@ -279,8 +296,19 @@ const hashedResetToken =
       // ======================================
 
       let delivered = true;
-      try { await sendPasswordResetEmail(user, resetToken); } catch { delivered = false; }
-      if (!delivered && process.env.NODE_ENV !== "production" && process.env.AURAPAY_EXPOSE_TEST_EMAIL_LINKS === "true") {
+      let developmentLinkEnabled = false;
+      try { await sendPasswordResetEmail(user, resetToken); }
+      catch {
+        delivered = false;
+        developmentLinkEnabled = shouldExposeDevelopmentLinks();
+        if (!developmentLinkEnabled) {
+          await User.updateOne(
+            { _id: user._id, passwordResetToken: hashedResetToken },
+            { $set: { passwordResetToken: previousResetToken, passwordResetExpires: previousResetExpires } }
+          );
+        }
+      }
+      if (!delivered && developmentLinkEnabled) {
         generic.developmentResetLink = require("../services/emailService").buildPublicLink(`/reset-password/${resetToken}`);
       }
       return res.json(generic);
