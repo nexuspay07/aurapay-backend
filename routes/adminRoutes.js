@@ -28,6 +28,37 @@ router.get("/users", permission("user:view"), async (req, res) => {
   res.json({ success: true, data: users });
 });
 
+router.patch("/users/:id/verify-email", permission("merchant:verify"), async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 400, "INVALID_ID", "Invalid user ID.");
+  const session = await mongoose.startSession();
+  let verifiedUser;
+  try {
+    await session.withTransaction(async () => {
+      const target = await User.findById(req.params.id).select("+emailVerificationToken").session(session);
+      if (!target) { const error = new Error("User not found."); error.status = 404; error.code = "USER_NOT_FOUND"; throw error; }
+      if (target.role !== "merchant_owner") { const error = new Error("Only merchant owner email accounts can be verified."); error.status = 422; error.code = "UNSUPPORTED_TARGET"; throw error; }
+      if (!target.merchantId) { const error = new Error("Merchant owner relationship is invalid."); error.status = 422; error.code = "INVALID_MERCHANT_RELATIONSHIP"; throw error; }
+      const merchant = await Merchant.findById(target.merchantId).session(session);
+      if (!merchant || String(target.merchantId) !== String(merchant._id)) { const error = new Error("Merchant owner relationship is invalid."); error.status = 422; error.code = "INVALID_MERCHANT_RELATIONSHIP"; throw error; }
+      if (target.emailVerified === true || target.status === "verified") { const error = new Error("Owner email is already verified."); error.status = 409; error.code = "EMAIL_ALREADY_VERIFIED"; throw error; }
+      verifiedUser = await User.findOneAndUpdate(
+        { _id: target._id, role: "merchant_owner", merchantId: merchant._id, emailVerified: { $ne: true }, status: { $ne: "verified" } },
+        { $set: { emailVerified: true, status: "verified", emailVerificationToken: null, emailVerificationExpires: null } },
+        { new: true, session, runValidators: true }
+      );
+      if (!verifiedUser) { const error = new Error("Owner email is already verified."); error.status = 409; error.code = "EMAIL_ALREADY_VERIFIED"; throw error; }
+      await createAuditLog({ admin: req.user._id, actorEmail: req.user.email, action: "merchant_owner.email.manually_verified", targetType: "merchant_owner", targetId: verifiedUser._id, targetLabel: verifiedUser.email, severity: "high", metadata: { actingAdministrator: String(req.user._id), targetUser: String(verifiedUser._id), associatedMerchant: String(merchant._id), action: "private_tester_email_approval" }, req, session, throwOnError: true });
+    });
+    return res.json({ success: true, data: verifiedUser });
+  } catch (error) {
+    if (error.status) return fail(res, error.status, error.code, error.message);
+    console.error("Manual owner email verification failed:", error.message);
+    return fail(res, 500, "EMAIL_VERIFICATION_FAILED", "Unable to verify owner email.");
+  } finally {
+    await session.endSession();
+  }
+});
+
 router.post("/users/:id/freeze", permission("user:freeze"), async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return fail(res, 400, "INVALID_ID", "Invalid user ID.");
   const hours = Number(req.body?.hours); const freezeUntil = Number.isFinite(hours) && hours > 0 ? new Date(Date.now() + hours * 3600000) : null;

@@ -17,9 +17,11 @@ async function createAuditLog({
   severity = "low",
   metadata = {},
   req = null,
+  session = null,
+  throwOnError = false,
 }) {
   try {
-    await AuditLog.create({
+    const entry = {
       admin,
       action,
       actorEmail,
@@ -37,9 +39,12 @@ async function createAuditLog({
         null,
 
       userAgent: req?.headers["user-agent"] || null,
-    });
+    };
+    if (session) await AuditLog.create([entry], { session });
+    else await AuditLog.create(entry);
   } catch (err) {
     console.error("Audit log creation failed:", err.message);
+    if (throwOnError) throw err;
   }
 }
 
