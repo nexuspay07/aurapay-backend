@@ -9,7 +9,8 @@ const adminAuth = require("../middlewares/adminAuth");
 const permission = require("../middlewares/permission");
 const createAuditLog = require("../utils/createAuditLog");
 const AdminInvitation = require("../models/AdminInvitation");
-const { sendAdminInvitationEmail, sendAdminPasswordResetEmail } = require("../services/emailService");
+const emailService = require("../services/emailService");
+const { sendAdminInvitationEmail } = emailService;
 const { ADMIN_ROLES, ALL_ADMIN_PERMISSIONS, ROLE_PERMISSIONS, effectivePermissions, hasPermission } = require("../config/adminPermissions");
 
 const router = express.Router();
@@ -144,8 +145,9 @@ router.post("/invitations/:token/accept", async (req, res) => {
 
 router.post("/forgot-password", async (req, res) => {
   const message = "If an eligible account exists, reset instructions have been sent."; const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
-  if (validEmail(email)) { const user = await User.findOne({ email, role: { $in: ADMIN_ROLES }, adminDisabled: { $ne: true } }); if (user) { const token = crypto.randomBytes(32).toString("hex"); user.passwordResetToken = hashToken(token); user.passwordResetExpires = new Date(Date.now() + 3600000); await user.save(); await createAuditLog({ admin: user._id, actorEmail: user.email, action: "admin.password.reset.requested", targetType: "admin", targetId: user._id, targetLabel: user.email, severity: "medium", metadata: { expiresAt: user.passwordResetExpires }, req }); try { await sendAdminPasswordResetEmail(user, token); } catch {} } }
-  res.json({ success: true, data: { message } });
+  const data = { message };
+  if (validEmail(email)) { const user = await User.findOne({ email, role: { $in: ADMIN_ROLES }, adminDisabled: { $ne: true } }); if (user) { const token = crypto.randomBytes(32).toString("hex"); user.passwordResetToken = hashToken(token); user.passwordResetExpires = new Date(Date.now() + 3600000); await user.save(); await createAuditLog({ admin: user._id, actorEmail: user.email, action: "admin.password.reset.requested", targetType: "admin", targetId: user._id, targetLabel: user.email, severity: "medium", metadata: { expiresAt: user.passwordResetExpires }, req }); try { await emailService.sendAdminPasswordResetEmail(user, token); } catch { if (emailService.shouldExposeDevelopmentLinks()) { try { data.developmentResetLink = emailService.buildPublicLink(`/admin-reset-password/${token}`); } catch {} } } } }
+  res.json({ success: true, data });
 });
 router.post("/reset-password/:token", async (req, res) => {
   if (!strongPassword(req.body?.password)) return envelopeError(res, 400, "WEAK_PASSWORD", "Use at least 10 characters with uppercase, lowercase, and a number."); const user = await User.findOne({ passwordResetToken: hashToken(req.params.token), passwordResetExpires: { $gt: new Date() }, role: { $in: ADMIN_ROLES } }).select("+passwordResetToken +adminSecurityVersion");
