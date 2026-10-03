@@ -37,10 +37,15 @@ class PaymentOrchestrationService {
     return calculateFees(amount);
   }
 
-  async createPayment({ providerId = SANDBOX_PROVIDER_ID, merchant, checkoutSession = null, amount, currency, customerEmail = "", scenario = "success", idempotencyKey = "", requestId = "" }) {
+  async createPayment({ providerId = SANDBOX_PROVIDER_ID, merchant, checkoutSession = null, amount, currency, customerEmail = "", scenario = "success", idempotencyKey = "", providerIdempotencyKey = "", requestId = "" }) {
     const routing = this.routingService.route({ requestedProvider: providerId, currency });
     const adapter = this.registry.resolve(routing.selectedProvider);
-    const providerResult = normalizeProviderResult(await adapter.executePayment({ amount, currency, scenario }));
+    const providerResult = normalizeProviderResult(await adapter.executePayment({
+      amount,
+      currency,
+      scenario,
+      providerIdempotencyKey,
+    }));
     if (providerResult.provider !== adapter.id) {
       throw new Error(`Provider result identity mismatch for ${adapter.id}.`);
     }

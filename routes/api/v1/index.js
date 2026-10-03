@@ -9,6 +9,8 @@ const CheckoutSession = require("../../../models/CheckoutSession");
 const Settlement = require("../../../models/Settlement");
 const checkoutService = require("../../../services/checkoutService");
 const paymentOrchestrationService = require("../../../services/paymentOrchestrationService");
+const { providerRoutingService } = require("../../../services/providerRoutingService");
+const { deriveProviderIdempotencyKey } = require("../../../services/providerIdempotencyService");
 const sandboxPaymentSimulationService = require("../../../services/sandboxPaymentSimulationService");
 const paymentInspectorService = require("../../../services/paymentInspectorService");
 const {
@@ -58,7 +60,11 @@ function sendFailure(res, statusCode, code, message) {
   return failure(res, statusCode, code, message);
 }
 
-async function withIdempotency(req, res, endpoint, handler) {
+function isDuplicateKeyError(error) {
+  return error?.code === 11000;
+}
+
+async function withIdempotency(req, res, endpoint, handler, options = {}) {
   const key = req.headers["idempotency-key"];
 
   if (!key) {
@@ -71,14 +77,40 @@ async function withIdempotency(req, res, endpoint, handler) {
   }
 
   const requestHash = hashPayload(req.body);
-  const existing = await IdempotencyKey.findOne({
+  const identity = {
     merchant: req.merchant._id,
     endpoint,
     key,
-  });
+  };
 
-  if (existing) {
-    if (existing.requestHash !== requestHash) {
+  const providerIdempotencyKey = options.deriveProviderIdempotencyKey
+    ? deriveProviderIdempotencyKey({
+        merchantId: req.merchant._id,
+        endpoint,
+        idempotencyKey: key,
+      })
+    : null;
+
+  let reservation;
+  let ownsReservation = false;
+
+  try {
+    reservation = await IdempotencyKey.create({
+      ...identity,
+      requestHash,
+      state: "in_progress",
+      providerIdempotencyKey,
+      startedAt: new Date(),
+    });
+    ownsReservation = true;
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) throw error;
+    reservation = await IdempotencyKey.findOne(identity);
+    if (!reservation) throw error;
+  }
+
+  if (!ownsReservation) {
+    if (reservation.requestHash !== requestHash) {
       return sendFailure(
         res,
         409,
@@ -87,25 +119,47 @@ async function withIdempotency(req, res, endpoint, handler) {
       );
     }
 
-    res.locals.apiResponseSummary = {
-      success: true,
-      statusCode: existing.statusCode,
-      idempotentReplay: true,
-    };
+    // Records created before the reservation lifecycle are completed records.
+    if (!reservation.state || reservation.state === "completed") {
+      res.locals.apiResponseSummary = {
+        success: true,
+        statusCode: reservation.statusCode,
+        idempotentReplay: true,
+      };
 
-    return res.status(existing.statusCode).json(existing.responseBody);
+      return res.status(reservation.statusCode).json(reservation.responseBody);
+    }
+
+    return sendFailure(
+      res,
+      409,
+      "idempotency_in_progress",
+      "An operation with this idempotency key is already in progress."
+    );
   }
 
-  const result = await handler();
-  await IdempotencyKey.create({
-    merchant: req.merchant._id,
-    endpoint,
-    key,
-    requestHash,
-    statusCode: result.statusCode,
-    responseBody: result.body,
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-  });
+  const result = await handler({ providerIdempotencyKey });
+  const completedAt = new Date();
+  const finalized = await IdempotencyKey.updateOne(
+    {
+      _id: reservation._id,
+      state: "in_progress",
+      requestHash,
+    },
+    {
+      $set: {
+        state: "completed",
+        statusCode: result.statusCode,
+        responseBody: result.body,
+        completedAt,
+        expiresAt: new Date(completedAt.getTime() + 24 * 60 * 60 * 1000),
+      },
+    }
+  );
+
+  if (finalized.modifiedCount !== 1) {
+    throw new Error("Failed to finalize idempotency reservation.");
+  }
 
   res.locals.apiResponseSummary = {
     success: true,
@@ -188,7 +242,11 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
     // the same idempotency fingerprint while different providers conflict.
     req.body.provider = provider;
 
-    return await withIdempotency(req, res, "POST /api/v1/payments", async () => {
+    // This is a side-effect-free eligibility check. Keeping it ahead of the
+    // reservation avoids stranding a key for a provider that can never run.
+    providerRoutingService.route({ requestedProvider: provider, currency });
+
+    return await withIdempotency(req, res, "POST /api/v1/payments", async ({ providerIdempotencyKey }) => {
       const result = await paymentOrchestrationService.createPayment({
         providerId: provider,
         merchant: req.merchant._id,
@@ -198,6 +256,7 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
         description,
         scenario,
         idempotencyKey: req.headers["idempotency-key"],
+        providerIdempotencyKey,
         requestId: req.requestId,
       });
 
@@ -214,7 +273,7 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
           },
         },
       };
-    });
+    }, { deriveProviderIdempotencyKey: true });
   } catch (err) {
     if (err instanceof UnsupportedProviderError) {
       return sendFailure(res, 400, "unsupported_provider", err.message);

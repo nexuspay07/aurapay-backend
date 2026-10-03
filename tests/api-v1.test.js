@@ -8,10 +8,13 @@ const { installExternalNetworkTripwire } = require("./helpers/networkIsolation")
 process.env.API_RATE_LIMIT_MAX = process.env.API_RATE_LIMIT_MAX || "1000";
 process.env.API_RATE_LIMIT_WINDOW_MS =
   process.env.API_RATE_LIMIT_WINDOW_MS || "60000";
+process.env.PROVIDER_IDEMPOTENCY_HMAC_SECRET =
+  process.env.PROVIDER_IDEMPOTENCY_HMAC_SECRET || "phase-11a-test-only-provider-idempotency-secret";
 
 const app = require("../app");
 const ApiKey = require("../models/ApiKey");
 const ApiLog = require("../models/ApiLog");
+const Event = require("../models/Event");
 const IdempotencyKey = require("../models/IdempotencyKey");
 const Merchant = require("../models/Merchant");
 const MerchantWebhook = require("../models/MerchantWebhook");
@@ -101,7 +104,7 @@ test.before(async () => {
 
   const other = await createSandboxApiKey(otherMerchant, {
     name: "Other merchant key",
-    permissions: ["payments:read"],
+    permissions: ["payments:create", "payments:read"],
   });
   otherSecret = other.secretKey;
   createdIds.apiKeys.push(other.apiKey._id);
@@ -126,6 +129,7 @@ test.after(async () => {
   assertSafeDestructiveOperation();
   await ApiLog.deleteMany({ merchant: { $in: createdIds.merchants } });
   await IdempotencyKey.deleteMany({ merchant: { $in: createdIds.merchants } });
+  await Event.deleteMany({ merchant: { $in: createdIds.merchants } });
   await WebhookDelivery.deleteMany({ merchant: { $in: createdIds.merchants } });
   await MerchantWebhook.deleteMany({ merchant: { $in: createdIds.merchants } });
   await Settlement.deleteMany({ merchant: { $in: createdIds.merchants } });
@@ -279,6 +283,11 @@ test("unapproved and real provider names fail as client errors", async () => {
 
     assert.equal(res.status, 400);
     assert.equal(res.body.error.code, "unsupported_provider");
+    assert.equal(await IdempotencyKey.countDocuments({
+      merchant: merchant._id,
+      endpoint: "POST /api/v1/payments",
+      key: `unsupported-${provider}`,
+    }), 0);
   }
 });
 
@@ -525,6 +534,7 @@ test("payment idempotent replay and conflict do not execute the provider again",
 
     assert.equal(first.status, 201);
     assert.equal(replay.status, 201);
+    assert.deepEqual(replay.body, first.body);
     assert.equal(first.body.data.id, replay.body.data.id);
     assert.equal(conflict.status, 409);
     assert.equal(conflict.body.error.code, "idempotency_conflict");
@@ -533,6 +543,232 @@ test("payment idempotent replay and conflict do not execute the provider again",
   } finally {
     provider.executePayment = executePayment;
   }
+});
+
+test("20 concurrent equivalent payments reserve once and create one lifecycle", async () => {
+  const idempotencyKey = `concurrent-${runId}`;
+  const provider = providerRegistry.resolve(SANDBOX_PROVIDER_ID);
+  const executePayment = provider.executePayment;
+  let executions = 0;
+  let releaseProvider;
+  let signalProviderEntered;
+  const providerEntered = new Promise((resolve) => { signalProviderEntered = resolve; });
+  const providerRelease = new Promise((resolve) => { releaseProvider = resolve; });
+
+  provider.executePayment = async (...args) => {
+    executions += 1;
+    signalProviderEntered();
+    await providerRelease;
+    return executePayment.apply(provider, args);
+  };
+
+  try {
+    const options = {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 31, currency: "CAD", scenario: "success" },
+    };
+    const requests = Array.from({ length: 20 }, () => request("POST", "/api/v1/payments", options));
+
+    await providerEntered;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    releaseProvider();
+    const responses = await Promise.all(requests);
+
+    assert.equal(executions, 1);
+    assert.equal(responses.some((response) => response.status === 201), true);
+    for (const response of responses) {
+      assert.equal([201, 409].includes(response.status), true);
+      if (response.status === 409) assert.equal(response.body.error.code, "idempotency_in_progress");
+    }
+
+    const transactions = await Transaction.find({ merchant: merchant._id, idempotencyKey });
+    assert.equal(transactions.length, 1);
+    createdIds.transactions.push(transactions[0]._id);
+    const settlements = await Settlement.find({ transaction: transactions[0]._id });
+    assert.equal(settlements.length, 1);
+    const events = await Event.find({
+      $or: [
+        { resourceType: "transaction", resourceId: transactions[0]._id },
+        { resourceType: "settlement", resourceId: settlements[0]._id },
+      ],
+    });
+    assert.deepEqual(events.map((event) => event.eventType).sort(), [
+      "payment.completed",
+      "payment.created",
+      "settlement.created",
+    ]);
+
+    const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
+    assert.equal(reservation.state, "completed");
+    assert.ok(reservation.providerIdempotencyKey);
+    assert.equal(reservation.providerIdempotencyKey.includes(idempotencyKey), false);
+    assert.ok(reservation.completedAt);
+    assert.ok(Math.abs(reservation.expiresAt.getTime() - reservation.completedAt.getTime() - 24 * 60 * 60 * 1000) < 1000);
+  } finally {
+    releaseProvider?.();
+    provider.executePayment = executePayment;
+  }
+});
+
+test("changed payload conflicts while the original payment is in progress", async () => {
+  const idempotencyKey = `in-progress-conflict-${runId}`;
+  const provider = providerRegistry.resolve(SANDBOX_PROVIDER_ID);
+  const executePayment = provider.executePayment;
+  let executions = 0;
+  let releaseProvider;
+  let signalProviderEntered;
+  const providerEntered = new Promise((resolve) => { signalProviderEntered = resolve; });
+  const providerRelease = new Promise((resolve) => { releaseProvider = resolve; });
+
+  provider.executePayment = async (...args) => {
+    executions += 1;
+    signalProviderEntered();
+    await providerRelease;
+    return executePayment.apply(provider, args);
+  };
+
+  try {
+    const firstPromise = request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 32, currency: "CAD" },
+    });
+    await providerEntered;
+    const conflict = await request("POST", "/api/v1/payments", {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 33, currency: "CAD" },
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error.code, "idempotency_conflict");
+    assert.equal(executions, 1);
+
+    releaseProvider();
+    const first = await firstPromise;
+    assert.equal(first.status, 201);
+    createdIds.transactions.push(first.body.data.id);
+  } finally {
+    releaseProvider?.();
+    provider.executePayment = executePayment;
+  }
+});
+
+test("same raw idempotency key is isolated across merchants", async () => {
+  const key = `shared-${runId}`;
+  const first = await request("POST", "/api/v1/payments", {
+    token: fullSecret,
+    idempotencyKey: key,
+    body: { amount: 34, currency: "CAD" },
+  });
+  const second = await request("POST", "/api/v1/payments", {
+    token: otherSecret,
+    idempotencyKey: key,
+    body: { amount: 34, currency: "CAD" },
+  });
+
+  assert.equal(first.status, 201);
+  assert.equal(second.status, 201);
+  assert.notEqual(first.body.data.id, second.body.data.id);
+  createdIds.transactions.push(first.body.data.id, second.body.data.id);
+
+  const reservations = await IdempotencyKey.find({ key }).sort({ merchant: 1 });
+  assert.equal(reservations.length, 2);
+  assert.notEqual(reservations[0].providerIdempotencyKey, reservations[1].providerIdempotencyKey);
+  const isolated = await request("GET", `/api/v1/payments/${first.body.data.id}`, { token: otherSecret });
+  assert.equal(isolated.status, 404);
+});
+
+test("uncertain provider failure leaves a non-expiring reservation and blocks retry", async () => {
+  const idempotencyKey = `uncertain-${runId}`;
+  const provider = providerRegistry.resolve(SANDBOX_PROVIDER_ID);
+  const executePayment = provider.executePayment;
+  let executions = 0;
+  provider.executePayment = async () => {
+    executions += 1;
+    throw new Error("simulated provider timeout");
+  };
+
+  try {
+    const options = { token: fullSecret, idempotencyKey, body: { amount: 35, currency: "CAD" } };
+    const first = await request("POST", "/api/v1/payments", options);
+    const duplicate = await request("POST", "/api/v1/payments", options);
+    assert.equal(first.status, 500);
+    assert.equal(first.body.error.code, "internal_error");
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.error.code, "idempotency_in_progress");
+    assert.equal(executions, 1);
+    assert.equal(await Transaction.countDocuments({ merchant: merchant._id, idempotencyKey }), 0);
+
+    const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
+    assert.equal(reservation.state, "in_progress");
+    assert.equal(reservation.expiresAt, undefined);
+  } finally {
+    provider.executePayment = executePayment;
+  }
+});
+
+test("idempotency finalization failure fails closed and blocks duplicate execution", async () => {
+  const idempotencyKey = `finalization-failure-${runId}`;
+  const provider = providerRegistry.resolve(SANDBOX_PROVIDER_ID);
+  const executePayment = provider.executePayment;
+  const updateOne = IdempotencyKey.updateOne;
+  let executions = 0;
+
+  provider.executePayment = async (...args) => {
+    executions += 1;
+    return executePayment.apply(provider, args);
+  };
+  IdempotencyKey.updateOne = async (filter, ...args) => {
+    if (filter?.state === "in_progress") throw new Error("simulated finalization failure");
+    return updateOne.call(IdempotencyKey, filter, ...args);
+  };
+
+  try {
+    const options = { token: fullSecret, idempotencyKey, body: { amount: 36, currency: "CAD" } };
+    const first = await request("POST", "/api/v1/payments", options);
+    const duplicate = await request("POST", "/api/v1/payments", options);
+    assert.equal(first.status, 500);
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.error.code, "idempotency_in_progress");
+    assert.equal(executions, 1);
+
+    const transactions = await Transaction.find({ merchant: merchant._id, idempotencyKey });
+    assert.equal(transactions.length, 1);
+    createdIds.transactions.push(transactions[0]._id);
+    const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
+    assert.equal(reservation.state, "in_progress");
+    assert.equal(reservation.expiresAt, undefined);
+  } finally {
+    IdempotencyKey.updateOne = updateOne;
+    provider.executePayment = executePayment;
+  }
+});
+
+test("legacy idempotency records without state replay as completed", async () => {
+  const key = `legacy-${runId}`;
+  const body = { amount: 37, currency: "CAD", provider: "aurapay_sandbox" };
+  const responseBody = { success: true, data: { id: "legacy_transaction_id" }, meta: { legacy: true } };
+  const { hashPayload } = require("../routes/api/v1/utils");
+  await IdempotencyKey.collection.insertOne({
+    merchant: merchant._id,
+    endpoint: "POST /api/v1/payments",
+    key,
+    requestHash: hashPayload(body),
+    statusCode: 201,
+    responseBody,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const replay = await request("POST", "/api/v1/payments", {
+    token: fullSecret,
+    idempotencyKey: key,
+    body: { amount: 37, currency: "CAD" },
+  });
+  assert.equal(replay.status, 201);
+  assert.deepEqual(replay.body, responseBody);
 });
 
 test("payment idempotency replays equivalent default selection and conflicts on provider changes", async () => {

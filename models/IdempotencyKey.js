@@ -26,19 +26,47 @@ const idempotencyKeySchema = new mongoose.Schema(
       required: true,
     },
 
+    state: {
+      type: String,
+      enum: ["in_progress", "completed"],
+      default: "completed",
+      required: true,
+      index: true,
+    },
+
+    providerIdempotencyKey: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    startedAt: {
+      type: Date,
+      default: null,
+    },
+
+    completedAt: {
+      type: Date,
+      default: null,
+    },
+
     statusCode: {
       type: Number,
-      required: true,
+      required() {
+        return (this.state || "completed") === "completed";
+      },
     },
 
     responseBody: {
       type: Object,
-      required: true,
+      required() {
+        return (this.state || "completed") === "completed";
+      },
     },
 
     expiresAt: {
       type: Date,
-      required: true,
+      default: undefined,
       index: {
         expires: 0,
       },
