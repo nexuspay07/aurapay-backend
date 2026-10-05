@@ -195,7 +195,7 @@ const transactionSchema = new mongoose.Schema(
       },
       selectedProvider: {
         type: String,
-        enum: ["aurapay_sandbox", "stripe_sandbox", "paypal_sandbox"],
+        enum: ["aurapay_sandbox", "stripe_sandbox", "paypal_sandbox", "stripe_external_sandbox"],
       },
       policy: {
         type: String,
@@ -347,6 +347,20 @@ const transactionSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+  }
+);
+
+transactionSchema.index(
+  {
+    "routing.selectedProvider": 1,
+    providerPaymentId: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      "routing.selectedProvider": "stripe_external_sandbox",
+      providerPaymentId: { $type: "string" },
+    },
   }
 );
 

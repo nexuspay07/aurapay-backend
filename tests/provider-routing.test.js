@@ -49,6 +49,33 @@ test("omitted and explicit providers preserve explicit sandbox selection", () =>
   }
 });
 
+test("the external Stripe sandbox is explicit-only and does not alter auto routing", () => {
+  const resolved = [];
+  const registry = {
+    resolve(providerId) {
+      resolved.push(providerId);
+      return { id: providerId };
+    },
+  };
+  const service = new ProviderRoutingService(registry);
+
+  const explicit = service.route({
+    requestedProvider: "stripe_external_sandbox",
+    currency: "USD",
+  });
+  assert.deepEqual(explicit, {
+    mode: "explicit",
+    requestedProvider: "stripe_external_sandbox",
+    selectedProvider: "stripe_external_sandbox",
+    policy: "explicit_v1",
+    reason: "explicit_provider",
+  });
+
+  const automatic = service.route({ requestedProvider: "auto", currency: "USD" });
+  assert.equal(automatic.selectedProvider, "stripe_sandbox");
+  assert.deepEqual(resolved, ["stripe_external_sandbox", "stripe_sandbox"]);
+});
+
 test("real and unknown provider IDs remain unsupported", () => {
   for (const provider of ["stripe", "paypal", "unknown_provider"]) {
     assert.throws(

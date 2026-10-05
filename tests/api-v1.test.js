@@ -24,6 +24,10 @@ const User = require("../models/User");
 const WebhookDelivery = require("../models/WebhookDelivery");
 const apiKeyService = require("../services/apiKeyService");
 const { providerRegistry, SANDBOX_PROVIDER_ID } = require("../services/providers/providerRegistry");
+const {
+  STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
+  createStripeExternalSandboxPaymentProvider,
+} = require("../services/providers/stripeExternalSandboxPaymentProvider");
 const { createSandboxApiKey, createVerifiedMerchantAccount } = require("./helpers/merchantFixtures");
 
 let server;
@@ -769,6 +773,275 @@ test("legacy idempotency records without state replay as completed", async () =>
   });
   assert.equal(replay.status, 201);
   assert.deepEqual(replay.body, responseBody);
+});
+
+test("external Stripe sandbox uses the stored opaque key and returns only normalized AuraPay data", async () => {
+  const calls = [];
+  const adapter = createStripeExternalSandboxPaymentProvider({
+    stripeClient: {
+      paymentIntents: {
+        async create(params, options) {
+          calls.push({ params, options });
+          return {
+            object: "payment_intent",
+            id: `pi_external_success_${runId}`,
+            livemode: false,
+            amount: params.amount,
+            currency: params.currency,
+            status: "succeeded",
+            client_secret: "must_not_escape",
+            payment_method: { card: { last4: "4242" } },
+          };
+        },
+      },
+    },
+  });
+  providerRegistry.adapters.set(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID, adapter);
+
+  try {
+    const idempotencyKey = `external-success-${runId}`;
+    const options = {
+      token: fullSecret,
+      idempotencyKey,
+      body: {
+        amount: 41.23,
+        currency: "USD",
+        scenario: "success",
+        provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
+      },
+    };
+    const first = await request("POST", "/api/v1/payments", options);
+    const replay = await request("POST", "/api/v1/payments", options);
+
+    assert.equal(first.status, 201);
+    assert.deepEqual(replay.body, first.body);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].params.amount, 4123);
+    assert.equal(calls[0].params.currency, "usd");
+    assert.equal(calls[0].options.maxNetworkRetries, 0);
+
+    const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
+    assert.equal(calls[0].options.idempotencyKey, reservation.providerIdempotencyKey);
+    assert.equal(calls[0].options.idempotencyKey.includes(idempotencyKey), false);
+
+    const transaction = await Transaction.findById(first.body.data.id);
+    createdIds.transactions.push(transaction._id);
+    assert.equal(transaction.routing.selectedProvider, STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+    assert.deepEqual(transaction.rawProviderResponse, {
+      provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
+      scenario: "success",
+      code: "payment_completed",
+      livemode: false,
+    });
+    assert.equal(await Settlement.countDocuments({ transaction: transaction._id }), 1);
+
+    const publicPayload = JSON.stringify(first.body);
+    for (const forbidden of ["client_secret", "payment_method", "last4", "sk_test_", "rawProviderResponse"]) {
+      assert.equal(publicPayload.includes(forbidden), false);
+    }
+
+    await assert.rejects(
+      () => Transaction.create({
+        merchant: merchant._id,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        provider: "Test",
+        paymentType: "test",
+        providerPaymentId: transaction.providerPaymentId,
+        status: "completed",
+        success: true,
+        environment: "sandbox",
+        livemode: false,
+        sandboxScenario: "success",
+        routing: {
+          mode: "explicit",
+          requestedProvider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
+          selectedProvider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
+          policy: "explicit_v1",
+          reason: "explicit_provider",
+        },
+      }),
+      (error) => error?.code === 11000
+    );
+  } finally {
+    providerRegistry.adapters.delete(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+  }
+});
+
+test("external Stripe sandbox rejects unsupported input before reservation", async () => {
+  let calls = 0;
+  const adapter = createStripeExternalSandboxPaymentProvider({
+    stripeClient: {
+      paymentIntents: {
+        async create() {
+          calls += 1;
+          throw new Error("must not execute");
+        },
+      },
+    },
+  });
+  providerRegistry.adapters.set(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID, adapter);
+
+  try {
+    const cases = [
+      [`external-currency-${runId}`, { amount: 10, currency: "EUR", scenario: "success" }],
+      [`external-precision-${runId}`, { amount: 10.001, currency: "USD", scenario: "success" }],
+      [`external-precision-boundary-${runId}`, { amount: 1.00000000001, currency: "USD", scenario: "success" }],
+      [`external-provider-minimum-${runId}`, { amount: 0.49, currency: "USD", scenario: "success" }],
+      [`external-scenario-${runId}`, { amount: 10, currency: "USD", scenario: "pending" }],
+    ];
+    for (const [key, body] of cases) {
+      const response = await request("POST", "/api/v1/payments", {
+        token: fullSecret,
+        idempotencyKey: key,
+        body: { ...body, provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID },
+      });
+      assert.equal(response.status, 400);
+      assert.equal(response.body.error.code, "invalid_request");
+      assert.equal(await IdempotencyKey.countDocuments({ merchant: merchant._id, key }), 0);
+      assert.equal(await Transaction.countDocuments({ merchant: merchant._id, idempotencyKey: key }), 0);
+    }
+    assert.equal(calls, 0);
+  } finally {
+    providerRegistry.adapters.delete(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+  }
+});
+
+test("20 concurrent external Stripe requests produce one logical provider operation", async () => {
+  let calls = 0;
+  let release;
+  let signalEntered;
+  const entered = new Promise((resolve) => { signalEntered = resolve; });
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const adapter = createStripeExternalSandboxPaymentProvider({
+    stripeClient: {
+      paymentIntents: {
+        async create(params) {
+          calls += 1;
+          signalEntered();
+          await blocked;
+          return {
+            object: "payment_intent",
+            id: `pi_external_concurrent_${runId}`,
+            livemode: false,
+            amount: params.amount,
+            currency: params.currency,
+            status: "succeeded",
+          };
+        },
+      },
+    },
+  });
+  providerRegistry.adapters.set(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID, adapter);
+
+  try {
+    const idempotencyKey = `external-concurrent-${runId}`;
+    const options = {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 42, currency: "CAD", scenario: "success", provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID },
+    };
+    const requests = Array.from({ length: 20 }, () => request("POST", "/api/v1/payments", options));
+    await entered;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    release();
+    const responses = await Promise.all(requests);
+
+    assert.equal(calls, 1);
+    assert.equal(responses.some((response) => response.status === 201), true);
+    assert.equal(await Transaction.countDocuments({ merchant: merchant._id, idempotencyKey }), 1);
+    const transaction = await Transaction.findOne({ merchant: merchant._id, idempotencyKey });
+    createdIds.transactions.push(transaction._id);
+    assert.equal(await Settlement.countDocuments({ transaction: transaction._id }), 1);
+    for (const response of responses) {
+      assert.equal([201, 409].includes(response.status), true);
+      if (response.status === 409) assert.equal(response.body.error.code, "idempotency_in_progress");
+    }
+  } finally {
+    release?.();
+    providerRegistry.adapters.delete(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+  }
+});
+
+test("external Stripe uncertainty remains in progress and blocks a duplicate", async () => {
+  let calls = 0;
+  const adapter = createStripeExternalSandboxPaymentProvider({
+    stripeClient: {
+      paymentIntents: {
+        async create() {
+          calls += 1;
+          throw new Error("raw Stripe timeout detail");
+        },
+      },
+    },
+  });
+  providerRegistry.adapters.set(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID, adapter);
+
+  try {
+    const idempotencyKey = `external-timeout-${runId}`;
+    const options = {
+      token: fullSecret,
+      idempotencyKey,
+      body: { amount: 43, currency: "USD", scenario: "success", provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID },
+    };
+    const first = await request("POST", "/api/v1/payments", options);
+    const duplicate = await request("POST", "/api/v1/payments", options);
+
+    assert.equal(first.status, 500);
+    assert.deepEqual(first.body, {
+      success: false,
+      error: { code: "internal_error", message: "Failed to create payment." },
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.error.code, "idempotency_in_progress");
+    assert.equal(calls, 1);
+    assert.equal(await Transaction.countDocuments({ merchant: merchant._id, idempotencyKey }), 0);
+    const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
+    assert.equal(reservation.state, "in_progress");
+    assert.equal(reservation.expiresAt, undefined);
+  } finally {
+    providerRegistry.adapters.delete(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+  }
+});
+
+test("external Stripe provider idempotency remains isolated across merchants", async () => {
+  const optionsSeen = [];
+  let sequence = 0;
+  const adapter = createStripeExternalSandboxPaymentProvider({
+    stripeClient: {
+      paymentIntents: {
+        async create(params, options) {
+          optionsSeen.push(options);
+          sequence += 1;
+          return {
+            object: "payment_intent",
+            id: `pi_external_merchant_${sequence}_${runId}`,
+            livemode: false,
+            amount: params.amount,
+            currency: params.currency,
+            status: "succeeded",
+          };
+        },
+      },
+    },
+  });
+  providerRegistry.adapters.set(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID, adapter);
+
+  try {
+    const idempotencyKey = `external-shared-${runId}`;
+    const body = { amount: 44, currency: "CAD", scenario: "success", provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID };
+    const first = await request("POST", "/api/v1/payments", { token: fullSecret, idempotencyKey, body });
+    const second = await request("POST", "/api/v1/payments", { token: otherSecret, idempotencyKey, body });
+
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+    assert.equal(optionsSeen.length, 2);
+    assert.notEqual(optionsSeen[0].idempotencyKey, optionsSeen[1].idempotencyKey);
+    createdIds.transactions.push(first.body.data.id, second.body.data.id);
+    assert.equal((await request("GET", `/api/v1/payments/${first.body.data.id}`, { token: otherSecret })).status, 404);
+  } finally {
+    providerRegistry.adapters.delete(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+  }
 });
 
 test("payment idempotency replays equivalent default selection and conflicts on provider changes", async () => {

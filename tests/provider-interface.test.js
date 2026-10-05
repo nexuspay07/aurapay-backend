@@ -13,6 +13,10 @@ const { paypalSandboxPaymentProvider } = require("../services/providers/paypalSa
 
 test("payment provider contract requires an id and executePayment operation", () => {
   assert.throws(() => assertPaymentProvider({ id: "missing-operation" }), /executePayment/);
+  assert.throws(
+    () => assertPaymentProvider({ id: "invalid-preflight", executePayment() {}, validatePaymentRequest: true }),
+    /validatePaymentRequest/
+  );
   assert.equal(assertPaymentProvider(sandboxPaymentProvider), sandboxPaymentProvider);
 });
 

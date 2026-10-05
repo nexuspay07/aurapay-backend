@@ -45,6 +45,7 @@ class PaymentOrchestrationService {
       currency,
       scenario,
       providerIdempotencyKey,
+      requestId,
     }));
     if (providerResult.provider !== adapter.id) {
       throw new Error(`Provider result identity mismatch for ${adapter.id}.`);

@@ -16,7 +16,9 @@ const paymentInspectorService = require("../../../services/paymentInspectorServi
 const {
   SANDBOX_PROVIDER_ID,
   UnsupportedProviderError,
+  providerRegistry,
 } = require("../../../services/providers/providerRegistry");
+const { ProviderRequestValidationError } = require("../../../services/providers/providerContract");
 
 const {
   failure,
@@ -244,7 +246,13 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
 
     // This is a side-effect-free eligibility check. Keeping it ahead of the
     // reservation avoids stranding a key for a provider that can never run.
-    providerRoutingService.route({ requestedProvider: provider, currency });
+    const preflightRouting = providerRoutingService.route({ requestedProvider: provider, currency });
+    const preflightAdapter = providerRegistry.resolve(preflightRouting.selectedProvider);
+    preflightAdapter.validatePaymentRequest?.({
+      amount: Number(amount),
+      currency: String(currency).toUpperCase(),
+      scenario,
+    });
 
     return await withIdempotency(req, res, "POST /api/v1/payments", async ({ providerIdempotencyKey }) => {
       const result = await paymentOrchestrationService.createPayment({
@@ -275,6 +283,9 @@ router.post("/payments", requireApiPermission("payments:create"), async (req, re
       };
     }, { deriveProviderIdempotencyKey: true });
   } catch (err) {
+    if (err instanceof ProviderRequestValidationError) {
+      return sendFailure(res, 400, "invalid_request", err.message);
+    }
     if (err instanceof UnsupportedProviderError) {
       return sendFailure(res, 400, "unsupported_provider", err.message);
     }

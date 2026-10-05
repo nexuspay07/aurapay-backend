@@ -11,12 +11,22 @@ class InvalidProviderResultError extends Error {
   }
 }
 
+class ProviderRequestValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ProviderRequestValidationError";
+  }
+}
+
 function assertPaymentProvider(adapter) {
   if (!adapter || typeof adapter.id !== "string" || !adapter.id.trim()) {
     throw new TypeError("Payment provider must declare a non-empty id.");
   }
   if (typeof adapter.executePayment !== "function") {
     throw new TypeError(`Payment provider "${adapter.id}" must implement executePayment(request).`);
+  }
+  if (adapter.validatePaymentRequest !== undefined && typeof adapter.validatePaymentRequest !== "function") {
+    throw new TypeError(`Payment provider "${adapter.id}" validatePaymentRequest must be a function.`);
   }
   return adapter;
 }
@@ -66,4 +76,9 @@ function normalizeProviderResult(result) {
   });
 }
 
-module.exports = { InvalidProviderResultError, assertPaymentProvider, normalizeProviderResult };
+module.exports = {
+  InvalidProviderResultError,
+  ProviderRequestValidationError,
+  assertPaymentProvider,
+  normalizeProviderResult,
+};

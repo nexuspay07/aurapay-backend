@@ -45,6 +45,10 @@ const routingModule = path.normalize(
   path.resolve(__dirname, "..", "services/providerRoutingService.js")
 );
 
+const externalStripeAdapterModule = path.normalize(
+  path.resolve(__dirname, "..", "services/providers/stripeExternalSandboxPaymentProvider.js")
+);
+
 let server;
 let baseUrl;
 
@@ -82,6 +86,7 @@ test("multi-provider sandbox adapters initialize without loading quarantined pro
   for (const providerModule of providerModules) {
     assert.equal(loadedModules.has(providerModule), false);
   }
+  assert.equal(loadedModules.has(externalStripeAdapterModule), false);
 });
 
 test("provider routing initializes without loading quarantined providers", () => {

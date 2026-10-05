@@ -3,6 +3,24 @@ const { sandboxPaymentProvider } = require("./sandboxPaymentProvider");
 const { stripeSandboxPaymentProvider } = require("./stripeSandboxPaymentProvider");
 const { paypalSandboxPaymentProvider } = require("./paypalSandboxPaymentProvider");
 
+function configuredAdapters(env = process.env) {
+  const adapters = [
+    sandboxPaymentProvider,
+    stripeSandboxPaymentProvider,
+    paypalSandboxPaymentProvider,
+  ];
+
+  if (env.STRIPE_EXTERNAL_SANDBOX_ENABLED === "true") {
+    // Keep the Stripe SDK and client uninitialized unless explicitly enabled.
+    const {
+      createStripeExternalSandboxPaymentProviderFromEnvironment,
+    } = require("./stripeExternalSandboxPaymentProvider");
+    adapters.push(createStripeExternalSandboxPaymentProviderFromEnvironment({ env }));
+  }
+
+  return adapters;
+}
+
 class UnsupportedProviderError extends Error {
   constructor(providerId) {
     super(`Unsupported payment provider: ${providerId}`);
@@ -26,10 +44,12 @@ class ProviderRegistry {
 }
 
 const SANDBOX_PROVIDER_ID = "aurapay_sandbox";
-const providerRegistry = new ProviderRegistry([
-  sandboxPaymentProvider,
-  stripeSandboxPaymentProvider,
-  paypalSandboxPaymentProvider,
-]);
+const providerRegistry = new ProviderRegistry(configuredAdapters());
 
-module.exports = { ProviderRegistry, SANDBOX_PROVIDER_ID, UnsupportedProviderError, providerRegistry };
+module.exports = {
+  ProviderRegistry,
+  SANDBOX_PROVIDER_ID,
+  UnsupportedProviderError,
+  configuredAdapters,
+  providerRegistry,
+};
