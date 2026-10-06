@@ -791,6 +791,8 @@ test("external Stripe sandbox uses the stored opaque key and returns only normal
             status: "succeeded",
             client_secret: "must_not_escape",
             payment_method: { card: { last4: "4242" } },
+            last_payment_error: { message: "native error must not escape" },
+            lastResponse: { headers: { authorization: "Bearer must_not_escape" } },
           };
         },
       },
@@ -806,6 +808,8 @@ test("external Stripe sandbox uses the stored opaque key and returns only normal
       body: {
         amount: 41.23,
         currency: "USD",
+        customerEmail: "external-success@example.com",
+        description: "AuraPay-only description",
         scenario: "success",
         provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
       },
@@ -814,30 +818,96 @@ test("external Stripe sandbox uses the stored opaque key and returns only normal
     const replay = await request("POST", "/api/v1/payments", options);
 
     assert.equal(first.status, 201);
+    assert.equal(first.body.success, true);
+    assert.equal(first.body.data.status, "completed");
+    assert.equal(first.body.data.success, true);
+    assert.equal(first.body.meta.outcome, "payment_completed");
+    assert.equal(first.body.meta.routing.selectedProvider, STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
     assert.deepEqual(replay.body, first.body);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].params.amount, 4123);
-    assert.equal(calls[0].params.currency, "usd");
-    assert.equal(calls[0].options.maxNetworkRetries, 0);
 
     const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
+    assert.deepEqual(calls[0], {
+      params: {
+        amount: 4123,
+        currency: "usd",
+        payment_method: "pm_card_visa",
+        payment_method_types: ["card"],
+        confirm: true,
+      },
+      options: {
+        idempotencyKey: reservation.providerIdempotencyKey,
+        timeout: 10000,
+        maxNetworkRetries: 0,
+      },
+    });
     assert.equal(calls[0].options.idempotencyKey, reservation.providerIdempotencyKey);
     assert.equal(calls[0].options.idempotencyKey.includes(idempotencyKey), false);
+    assert.equal(reservation.state, "completed");
+    assert.equal(reservation.statusCode, 201);
+    assert.deepEqual(JSON.parse(JSON.stringify(reservation.responseBody)), first.body);
 
     const transaction = await Transaction.findById(first.body.data.id);
     createdIds.transactions.push(transaction._id);
+    assert.equal(transaction.status, "completed");
+    assert.equal(transaction.success, true);
     assert.equal(transaction.routing.selectedProvider, STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+    assert.equal(transaction.providerPaymentId, `pi_external_success_${runId}`);
     assert.deepEqual(transaction.rawProviderResponse, {
       provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
       scenario: "success",
       code: "payment_completed",
       livemode: false,
     });
-    assert.equal(await Settlement.countDocuments({ transaction: transaction._id }), 1);
+    const settlements = await Settlement.find({ transaction: transaction._id });
+    assert.equal(settlements.length, 1);
+    assert.equal(settlements[0].status, "pending");
+    assert.equal(String(first.body.meta.settlementId), String(settlements[0]._id));
 
-    const publicPayload = JSON.stringify(first.body);
-    for (const forbidden of ["client_secret", "payment_method", "last4", "sk_test_", "rawProviderResponse"]) {
-      assert.equal(publicPayload.includes(forbidden), false);
+    const events = await Event.find({
+      $or: [
+        { resourceType: "transaction", resourceId: transaction._id },
+        { resourceType: "settlement", resourceId: settlements[0]._id },
+      ],
+    });
+    assert.deepEqual(events.map(({ eventType }) => eventType).sort(), [
+      "payment.completed",
+      "payment.created",
+      "settlement.created",
+    ]);
+
+    const providerCall = JSON.stringify(calls[0]);
+    for (const forbidden of [
+      idempotencyKey,
+      String(merchant._id),
+      "external-success@example.com",
+      "AuraPay-only description",
+      "X-Request-Id",
+      "requestId",
+      "metadata",
+      "sk_test_",
+    ]) {
+      assert.equal(providerCall.includes(forbidden), false);
+    }
+
+    const quarantined = JSON.stringify({
+      response: first.body,
+      providerStorage: transaction.rawProviderResponse,
+      events: events.map(({ payload }) => payload),
+      replay: reservation.responseBody,
+    });
+    for (const forbidden of [
+      "client_secret",
+      "payment_method",
+      "last_payment_error",
+      "lastResponse",
+      "last4",
+      "native error must not escape",
+      "authorization",
+      "sk_test_",
+      "rawProviderResponse",
+    ]) {
+      assert.equal(quarantined.includes(forbidden), false);
     }
 
     await assert.rejects(
@@ -865,6 +935,161 @@ test("external Stripe sandbox uses the stored opaque key and returns only normal
     );
   } finally {
     providerRegistry.adapters.delete(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+  }
+});
+
+test("external Stripe definitive declines persist normalized failures without native leakage", async () => {
+  const cases = [
+    {
+      scenario: "declined",
+      declineCode: "generic_decline",
+      outcomeCode: "card_declined",
+      message: "Stripe test payment was declined.",
+      paymentMethod: "pm_card_visa_chargeDeclined",
+    },
+    {
+      scenario: "insufficient_funds",
+      declineCode: "insufficient_funds",
+      outcomeCode: "insufficient_funds",
+      message: "Stripe test payment failed due to insufficient funds.",
+      paymentMethod: "pm_card_visa_chargeDeclinedInsufficientFunds",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const calls = [];
+    const paymentIntentId = `pi_external_${testCase.scenario}_${runId}`;
+    const adapter = createStripeExternalSandboxPaymentProvider({
+      stripeClient: {
+        paymentIntents: {
+          async create(params, options) {
+            calls.push({ params, options });
+            const error = new Error("raw Stripe decline diagnostic must not escape");
+            error.code = "card_declined";
+            error.decline_code = testCase.declineCode;
+            error.stack = "raw Stripe stack must not escape";
+            error.headers = { authorization: "Bearer sk_test_must_not_escape" };
+            error.payment_intent = {
+              object: "payment_intent",
+              id: paymentIntentId,
+              livemode: false,
+              amount: params.amount,
+              currency: params.currency,
+              status: "requires_payment_method",
+              client_secret: "decline_secret_must_not_escape",
+              payment_method: { card: { last4: "0002" } },
+              last_payment_error: { message: error.message },
+              lastResponse: { headers: error.headers },
+            };
+            throw error;
+          },
+        },
+      },
+    });
+    providerRegistry.adapters.set(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID, adapter);
+
+    try {
+      const idempotencyKey = `external-${testCase.scenario}-${runId}`;
+      const options = {
+        token: fullSecret,
+        idempotencyKey,
+        body: {
+          amount: 45.67,
+          currency: "USD",
+          customerEmail: `${testCase.scenario}@example.com`,
+          description: "AuraPay-only decline description",
+          scenario: testCase.scenario,
+          provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
+        },
+      };
+      const first = await request("POST", "/api/v1/payments", options);
+      const replay = await request("POST", "/api/v1/payments", options);
+
+      assert.equal(first.status, 201);
+      assert.equal(first.body.success, true);
+      assert.equal(first.body.data.status, "failed");
+      assert.equal(first.body.data.success, false);
+      assert.equal(first.body.meta.outcome, testCase.outcomeCode);
+      assert.equal(first.body.meta.settlementId, null);
+      assert.equal(first.body.meta.routing.selectedProvider, STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+      assert.deepEqual(replay.body, first.body);
+      assert.equal(calls.length, 1);
+
+      const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
+      assert.deepEqual(calls[0], {
+        params: {
+          amount: 4567,
+          currency: "usd",
+          payment_method: testCase.paymentMethod,
+          payment_method_types: ["card"],
+          confirm: true,
+        },
+        options: {
+          idempotencyKey: reservation.providerIdempotencyKey,
+          timeout: 10000,
+          maxNetworkRetries: 0,
+        },
+      });
+      assert.equal(reservation.state, "completed");
+      assert.equal(reservation.statusCode, 201);
+      assert.deepEqual(JSON.parse(JSON.stringify(reservation.responseBody)), first.body);
+
+      const transaction = await Transaction.findById(first.body.data.id);
+      createdIds.transactions.push(transaction._id);
+      assert.equal(transaction.status, "failed");
+      assert.equal(transaction.success, false);
+      assert.equal(transaction.errorMessage, testCase.message);
+      assert.equal(transaction.providerPaymentId, paymentIntentId);
+      assert.equal(transaction.routing.selectedProvider, STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+      assert.deepEqual(transaction.rawProviderResponse, {
+        provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
+        scenario: testCase.scenario,
+        code: testCase.outcomeCode,
+        livemode: false,
+      });
+      assert.equal(await Settlement.countDocuments({ transaction: transaction._id }), 0);
+
+      const events = await Event.find({ resourceType: "transaction", resourceId: transaction._id });
+      assert.deepEqual(events.map(({ eventType }) => eventType).sort(), ["payment.created", "payment.failed"]);
+      const failedEvent = events.find(({ eventType }) => eventType === "payment.failed");
+      assert.equal(failedEvent.payload.failureCode, testCase.outcomeCode);
+      assert.equal(failedEvent.payload.failureMessage, testCase.message);
+
+      const providerCall = JSON.stringify(calls[0]);
+      for (const forbidden of [
+        idempotencyKey,
+        String(merchant._id),
+        `${testCase.scenario}@example.com`,
+        "AuraPay-only decline description",
+        "requestId",
+        "metadata",
+        "sk_test_",
+      ]) {
+        assert.equal(providerCall.includes(forbidden), false);
+      }
+
+      const quarantined = JSON.stringify({
+        response: first.body,
+        transaction: transaction.rawProviderResponse,
+        events: events.map(({ payload }) => payload),
+        replay: reservation.responseBody,
+      });
+      for (const forbidden of [
+        "client_secret",
+        "payment_method",
+        "last_payment_error",
+        "lastResponse",
+        "last4",
+        "raw Stripe decline diagnostic",
+        "raw Stripe stack",
+        "authorization",
+        "sk_test_",
+      ]) {
+        assert.equal(quarantined.includes(forbidden), false);
+      }
+    } finally {
+      providerRegistry.adapters.delete(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
+    }
   }
 });
 
@@ -943,6 +1168,12 @@ test("20 concurrent external Stripe requests produce one logical provider operat
     };
     const requests = Array.from({ length: 20 }, () => request("POST", "/api/v1/payments", options));
     await entered;
+    const conflict = await request("POST", "/api/v1/payments", {
+      ...options,
+      body: { ...options.body, amount: 42.01 },
+    });
+    assert.equal(conflict.status, 409);
+    assert.equal(conflict.body.error.code, "idempotency_conflict");
     await new Promise((resolve) => setTimeout(resolve, 100));
     release();
     const responses = await Promise.all(requests);
@@ -952,7 +1183,24 @@ test("20 concurrent external Stripe requests produce one logical provider operat
     assert.equal(await Transaction.countDocuments({ merchant: merchant._id, idempotencyKey }), 1);
     const transaction = await Transaction.findOne({ merchant: merchant._id, idempotencyKey });
     createdIds.transactions.push(transaction._id);
-    assert.equal(await Settlement.countDocuments({ transaction: transaction._id }), 1);
+    const settlements = await Settlement.find({ transaction: transaction._id });
+    assert.equal(settlements.length, 1);
+    const events = await Event.find({
+      $or: [
+        { resourceType: "transaction", resourceId: transaction._id },
+        { resourceType: "settlement", resourceId: settlements[0]._id },
+      ],
+    });
+    assert.deepEqual(events.map(({ eventType }) => eventType).sort(), [
+      "payment.completed",
+      "payment.created",
+      "settlement.created",
+    ]);
+    const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
+    assert.equal(await IdempotencyKey.countDocuments({ merchant: merchant._id, key: idempotencyKey }), 1);
+    assert.equal(reservation.state, "completed");
+    assert.equal(reservation.statusCode, 201);
+    assert.ok(reservation.completedAt);
     for (const response of responses) {
       assert.equal([201, 409].includes(response.status), true);
       if (response.status === 409) assert.equal(response.body.error.code, "idempotency_in_progress");
@@ -964,13 +1212,18 @@ test("20 concurrent external Stripe requests produce one logical provider operat
 });
 
 test("external Stripe uncertainty remains in progress and blocks a duplicate", async () => {
-  let calls = 0;
+  const calls = [];
   const adapter = createStripeExternalSandboxPaymentProvider({
     stripeClient: {
       paymentIntents: {
-        async create() {
-          calls += 1;
-          throw new Error("raw Stripe timeout detail");
+        async create(params, options) {
+          calls.push({ params, options });
+          const error = new Error("raw Stripe timeout diagnostic with sk_test_must_not_escape");
+          error.type = "StripeConnectionError";
+          error.code = "ETIMEDOUT";
+          error.headers = { authorization: "Bearer must_not_escape" };
+          error.raw = { requestId: "req_native_must_not_escape", payment_method: { card: { last4: "4242" } } };
+          throw error;
         },
       },
     },
@@ -982,7 +1235,19 @@ test("external Stripe uncertainty remains in progress and blocks a duplicate", a
     const options = {
       token: fullSecret,
       idempotencyKey,
-      body: { amount: 43, currency: "USD", scenario: "success", provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID },
+      body: {
+        amount: 43,
+        currency: "USD",
+        customerEmail: "uncertain@example.com",
+        description: "AuraPay-only uncertainty description",
+        scenario: "success",
+        provider: STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID,
+      },
+    };
+    const countsBefore = {
+      transactions: await Transaction.countDocuments({ merchant: merchant._id }),
+      settlements: await Settlement.countDocuments({ merchant: merchant._id }),
+      events: await Event.countDocuments({ merchant: merchant._id }),
     };
     const first = await request("POST", "/api/v1/payments", options);
     const duplicate = await request("POST", "/api/v1/payments", options);
@@ -994,11 +1259,51 @@ test("external Stripe uncertainty remains in progress and blocks a duplicate", a
     });
     assert.equal(duplicate.status, 409);
     assert.equal(duplicate.body.error.code, "idempotency_in_progress");
-    assert.equal(calls, 1);
+    assert.equal(calls.length, 1);
     assert.equal(await Transaction.countDocuments({ merchant: merchant._id, idempotencyKey }), 0);
+    assert.equal(await Transaction.countDocuments({ merchant: merchant._id }), countsBefore.transactions);
+    assert.equal(await Settlement.countDocuments({ merchant: merchant._id }), countsBefore.settlements);
+    assert.equal(await Event.countDocuments({ merchant: merchant._id }), countsBefore.events);
     const reservation = await IdempotencyKey.findOne({ merchant: merchant._id, key: idempotencyKey });
     assert.equal(reservation.state, "in_progress");
     assert.equal(reservation.expiresAt, undefined);
+    assert.deepEqual(calls[0], {
+      params: {
+        amount: 4300,
+        currency: "usd",
+        payment_method: "pm_card_visa",
+        payment_method_types: ["card"],
+        confirm: true,
+      },
+      options: {
+        idempotencyKey: reservation.providerIdempotencyKey,
+        timeout: 10000,
+        maxNetworkRetries: 0,
+      },
+    });
+    const providerCall = JSON.stringify(calls[0]);
+    for (const forbidden of [
+      idempotencyKey,
+      String(merchant._id),
+      "uncertain@example.com",
+      "AuraPay-only uncertainty description",
+      "requestId",
+      "req_native_must_not_escape",
+      "sk_test_",
+    ]) {
+      assert.equal(providerCall.includes(forbidden), false);
+    }
+    const publicState = JSON.stringify({ first: first.body, duplicate: duplicate.body, reservation });
+    for (const forbidden of [
+      "raw Stripe timeout diagnostic",
+      "sk_test_",
+      "authorization",
+      "req_native_must_not_escape",
+      "payment_method",
+      "last4",
+    ]) {
+      assert.equal(publicState.includes(forbidden), false);
+    }
   } finally {
     providerRegistry.adapters.delete(STRIPE_EXTERNAL_SANDBOX_PROVIDER_ID);
   }
