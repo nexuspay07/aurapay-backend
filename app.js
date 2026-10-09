@@ -13,6 +13,9 @@ const apiKeyRoutes =
 
 const app = express();
 
+const stripeExternalWebhookRoutes =
+  require("./routes/stripeExternalWebhookRoutes");
+
 console.log("1 - Express app created");
 
 app.get("/health", (req, res) => {
@@ -33,6 +36,35 @@ console.log("3 - CORS registered");
 // ======================================
 // BODY PARSERS
 // ======================================
+
+const STRIPE_EXTERNAL_WEBHOOK_PATH =
+  "/api/provider-webhooks/stripe/test";
+
+app.use(
+  STRIPE_EXTERNAL_WEBHOOK_PATH,
+  express.raw({
+    type: "application/json",
+    limit: "256kb",
+  }),
+  stripeExternalWebhookRoutes
+);
+
+app.use(
+  STRIPE_EXTERNAL_WEBHOOK_PATH,
+  (err, req, res, next) => {
+    if (err?.type === "entity.too.large") {
+      return res.status(413).json({
+        success: false,
+        error: {
+          code: "payload_too_large",
+          message: "Webhook payload exceeds the allowed size.",
+        },
+      });
+    }
+
+    return next(err);
+  }
+);
 
 app.use(express.json());
 
