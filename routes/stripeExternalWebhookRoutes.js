@@ -5,6 +5,12 @@ const {
   StripeWebhookVerificationError,
   verifyStripeTestWebhook,
 } = require("../services/stripeWebhookVerificationService");
+const {
+  ProviderWebhookActiveLeaseError,
+  ProviderWebhookConflictError,
+  ProviderWebhookPersistenceError,
+  persistVerifiedWebhookEvent,
+} = require("../services/providerWebhookEventService");
 
 const router = express.Router();
 
@@ -30,7 +36,7 @@ function signatureHeader(req) {
   return occurrences[0];
 }
 
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   if (!req.is("application/json")) {
     return failure(res, 415, "unsupported_media_type", "Webhook content type must be application/json.");
   }
@@ -45,6 +51,11 @@ router.post("/", (req, res) => {
       signature: signatureHeader(req),
     });
 
+    const persistence = await persistVerifiedWebhookEvent({
+      event,
+      rawBody: req.body,
+    });
+
     return res.status(200).json({
       success: true,
       data: {
@@ -52,7 +63,9 @@ router.post("/", (req, res) => {
         verified: true,
         livemode: false,
         type: event.type,
-        processing: "not_started",
+        persisted: true,
+        processing: "deferred",
+        duplicate: persistence.disposition === "duplicate",
       },
     });
   } catch (error) {
@@ -61,6 +74,15 @@ router.post("/", (req, res) => {
     }
     if (error instanceof StripeWebhookVerificationError) {
       return failure(res, 400, "invalid_webhook", "Stripe test webhook verification failed.");
+    }
+    if (error instanceof ProviderWebhookConflictError) {
+      return failure(res, 409, "webhook_event_conflict", "Webhook event identity conflicts with prior content.");
+    }
+    if (error instanceof ProviderWebhookActiveLeaseError) {
+      return failure(res, 409, "webhook_in_progress", "Webhook event recording is already in progress.");
+    }
+    if (error instanceof ProviderWebhookPersistenceError) {
+      return failure(res, 503, "webhook_persistence_unavailable", "Webhook event could not be durably recorded.");
     }
     return failure(res, 400, "invalid_webhook", "Stripe test webhook verification failed.");
   }

@@ -12,6 +12,10 @@ const app = require("./app");
 const connectDatabase =
   require("./config/database");
 
+const {
+  initializeProviderWebhookEventIndex,
+} = require("./services/providerWebhookEventService");
+
 const initializeSocket =
   require("./config/socket");
 
@@ -40,6 +44,12 @@ async function startServer() {
   try {
 
     await connectDatabase();
+
+    try {
+      await initializeProviderWebhookEventIndex();
+    } catch {
+      console.error("Stripe webhook event storage is unavailable; webhook processing remains disabled.");
+    }
 
     const PORT =
       process.env.PORT || 3000;

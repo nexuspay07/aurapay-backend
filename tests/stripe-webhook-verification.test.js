@@ -5,6 +5,16 @@ const Stripe = require("stripe");
 
 const { installExternalNetworkTripwire } = require("../config/testNetworkIsolation");
 const { SIGNATURE_TOLERANCE_SECONDS } = require("../services/stripeWebhookVerificationService");
+const { initializeProviderWebhookEventIndex } = require("../services/providerWebhookEventService");
+const ProviderWebhookEvent = require("../models/ProviderWebhookEvent");
+const Transaction = require("../models/Transaction");
+const Settlement = require("../models/Settlement");
+const Event = require("../models/Event");
+const {
+  assertSafeDestructiveOperation,
+  connectTestDatabase,
+  disconnectTestDatabase,
+} = require("./helpers/testDatabase");
 
 installExternalNetworkTripwire();
 
@@ -65,6 +75,13 @@ async function post(payload, { signature, contentType = "application/json" } = {
 }
 
 test.before(async () => {
+  await connectTestDatabase();
+  await initializeProviderWebhookEventIndex();
+  assertSafeDestructiveOperation();
+  await ProviderWebhookEvent.deleteMany({
+    provider: "stripe_external_sandbox",
+    providerEventId: /^evt_phase12b_/,
+  });
   server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -72,6 +89,12 @@ test.before(async () => {
 
 test.after(async () => {
   await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  assertSafeDestructiveOperation();
+  await ProviderWebhookEvent.deleteMany({
+    provider: "stripe_external_sandbox",
+    providerEventId: /^evt_phase12b_/,
+  });
+  await disconnectTestDatabase();
   if (originalEnvironment.enabled === undefined) delete process.env.STRIPE_EXTERNAL_WEBHOOKS_ENABLED;
   else process.env.STRIPE_EXTERNAL_WEBHOOKS_ENABLED = originalEnvironment.enabled;
   if (originalEnvironment.secret === undefined) delete process.env.STRIPE_TEST_WEBHOOK_SECRET;
@@ -97,7 +120,9 @@ test("valid locally signed success and failure events use the raw-body route", a
         verified: true,
         livemode: false,
         type: fixture.type,
-        processing: "not_started",
+        persisted: true,
+        processing: "deferred",
+        duplicate: false,
       },
     });
   }
@@ -182,24 +207,33 @@ test("disabled and missing-secret configurations fail closed", async () => {
   process.env.STRIPE_TEST_WEBHOOK_SECRET = TEST_SECRET;
 });
 
-test("verification performs no persistence, outbound call, or legacy route activation", async () => {
-  const mongoose = require("mongoose");
-  const originalCreate = mongoose.Model.create;
-  const originalUpdateOne = mongoose.Model.updateOne;
-  const originalSave = mongoose.Model.prototype.save;
-  let mutations = 0;
-  mongoose.Model.create = async function blockedCreate() { mutations += 1; throw new Error("database mutation tripwire"); };
-  mongoose.Model.updateOne = async function blockedUpdate() { mutations += 1; throw new Error("database mutation tripwire"); };
-  mongoose.Model.prototype.save = async function blockedSave() { mutations += 1; throw new Error("database mutation tripwire"); };
-  try {
-    const payload = JSON.stringify(event({ id: "evt_phase12b_no_mutation" }));
-    assert.equal((await post(payload, { signature: signed(payload) })).status, 200);
-    assert.equal(mutations, 0);
-  } finally {
-    mongoose.Model.create = originalCreate;
-    mongoose.Model.updateOne = originalUpdateOne;
-    mongoose.Model.prototype.save = originalSave;
-  }
+test("verification persists only its safe event record and does not activate the legacy route", async () => {
+  const value = event({ id: "evt_phase12b_no_mutation", paymentIntent: { id: "pi_phase12b_no_mutation" } });
+  const financialCounts = async () => {
+    const transactions = await Transaction.find({
+      $or: [
+        { providerEventId: value.id },
+        { providerPaymentId: value.data.object.id },
+      ],
+    }).select("_id").lean();
+    const transactionIds = transactions.map((transaction) => transaction._id);
+    return Promise.all([
+      Promise.resolve(transactions.length),
+      Settlement.countDocuments({ transaction: { $in: transactionIds } }),
+      Event.countDocuments({
+        $or: [
+          { resourceId: { $in: transactionIds } },
+          { "payload.providerEventId": value.id },
+          { "payload.providerPaymentId": value.data.object.id },
+        ],
+      }),
+    ]);
+  };
+  const before = await financialCounts();
+  const payload = JSON.stringify(value);
+  assert.equal((await post(payload, { signature: signed(payload) })).status, 200);
+  const after = await financialCounts();
+  assert.deepEqual(after, before);
 
   const legacy = await fetch(`${baseUrl}/stripe/webhook`, {
     method: "POST",
