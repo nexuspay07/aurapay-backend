@@ -75,10 +75,45 @@ const providerWebhookEventSchema = new mongoose.Schema(
       ref: "Transaction",
       default: null,
     },
+    amountMinor: {
+      type: Number,
+      min: 1,
+      validate: (value) => value == null || Number.isSafeInteger(value),
+      default: null,
+    },
+    currency: {
+      type: String,
+      lowercase: true,
+      trim: true,
+      match: /^[a-z]{3}$/,
+      default: null,
+    },
+    processingVersion: {
+      type: Number,
+      min: 0,
+      validate: (value) => value == null || Number.isSafeInteger(value),
+      default: null,
+    },
+    financialStatus: {
+      type: String,
+      enum: ["pending", "processing", "processed", "failed"],
+      default: null,
+    },
+    processedAt: {
+      type: Date,
+      default: null,
+    },
+    financialOutcomeCode: {
+      type: String,
+      trim: true,
+      match: /^[a-z][a-z0-9_]{0,63}$/,
+      default: null,
+    },
   },
   {
     timestamps: true,
     strict: "throw",
+    autoIndex: false,
   }
 );
 

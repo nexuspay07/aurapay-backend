@@ -24,7 +24,6 @@ const settlementSchema =
           mongoose.Schema.Types.ObjectId,
         ref: "Transaction",
         required: true,
-        index: true,
       },
 
       // ======================================
@@ -128,10 +127,14 @@ outstandingAmount: {
     },
     {
       timestamps: true,
+      autoIndex: false,
     }
   );
 
-  
+settlementSchema.index(
+  { transaction: 1 },
+  { unique: true, name: "settlement_transaction_unique" }
+);
 
 module.exports =
   mongoose.model(

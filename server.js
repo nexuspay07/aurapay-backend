@@ -15,6 +15,9 @@ const connectDatabase =
 const {
   initializeProviderWebhookEventIndex,
 } = require("./services/providerWebhookEventService");
+const {
+  initializeStripeWebhookFinancialReadiness,
+} = require("./services/stripeWebhookFinancialReadinessService");
 
 const initializeSocket =
   require("./config/socket");
@@ -49,6 +52,12 @@ async function startServer() {
       await initializeProviderWebhookEventIndex();
     } catch {
       console.error("Stripe webhook event storage is unavailable; webhook processing remains disabled.");
+    }
+
+    try {
+      await initializeStripeWebhookFinancialReadiness();
+    } catch {
+      console.warn("Stripe webhook financial processing is unavailable.");
     }
 
     const PORT =

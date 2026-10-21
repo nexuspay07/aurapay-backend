@@ -347,6 +347,7 @@ const transactionSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    autoIndex: false,
   }
 );
 
@@ -357,6 +358,7 @@ transactionSchema.index(
   },
   {
     unique: true,
+    name: "routing.selectedProvider_1_providerPaymentId_1",
     partialFilterExpression: {
       "routing.selectedProvider": "stripe_external_sandbox",
       providerPaymentId: { $type: "string" },

@@ -108,14 +108,37 @@ const eventSchema = new mongoose.Schema(
 
     },
 
+    deduplicationKey: {
+
+      type: String,
+
+      trim: true,
+
+      minlength: 1,
+
+      default: null,
+
+    },
+
   },
 
   {
 
     timestamps: true,
 
+    autoIndex: false,
+
   }
 
+);
+
+eventSchema.index(
+  { environment: 1, livemode: 1, deduplicationKey: 1 },
+  {
+    unique: true,
+    name: "event_lifecycle_deduplication_unique",
+    partialFilterExpression: { deduplicationKey: { $type: "string" } },
+  }
 );
 
 module.exports =
