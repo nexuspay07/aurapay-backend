@@ -10,6 +10,7 @@ const allowedOrigins = [
   "http://127.0.0.1:5175",
 
   "https://aurapay-dashboard.vercel.app",
+  process.env.AURAPAY_PREVIEW_ORIGIN,
   process.env.AURAPAY_FRONTEND_URL,
   process.env.FRONTEND_URL,
 ].filter(Boolean);
@@ -27,17 +28,6 @@ module.exports = cors({
     if (
       allowedOrigins.includes(
         origin
-      )
-    ) {
-      return callback(
-        null,
-        true
-      );
-    }
-
-    if (
-      origin.endsWith(
-        ".vercel.app"
       )
     ) {
       return callback(

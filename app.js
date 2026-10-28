@@ -18,13 +18,6 @@ const stripeExternalWebhookRoutes =
 
 console.log("1 - Express app created");
 
-app.get("/health", (req, res) => {
-  return res.json({
-    success: true,
-    status: "ok",
-  });
-});
-
 // ======================================
 // CORS
 // ======================================
@@ -32,6 +25,13 @@ app.get("/health", (req, res) => {
 app.use(corsConfig);
 
 console.log("3 - CORS registered");
+
+app.get("/health", (req, res) => {
+  return res.json({
+    success: true,
+    status: "ok",
+  });
+});
 
 // ======================================
 // BODY PARSERS
